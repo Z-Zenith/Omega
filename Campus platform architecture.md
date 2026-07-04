@@ -136,7 +136,7 @@
 | AIS-02 | Internet plagiarism check | Teacher-only. Check submissions against internet sources | Must | When an assignment is submitted, the AI Services container shall check it against internet sources and report a similarity score, surfaced only in the Teacher Web App. | Every submission has a similarity score before the teacher grades it; score is not shown to the submitting student. |
 | AIS-03 | Cross-class copy-check | Teacher-only. Compare submissions against each other, flagging pairs at or above 90% similarity | Should | When assignments are submitted for a class, the AI Services container shall compare submissions against each other and flag pairs at or above 90% similarity, surfaced only in the Teacher Web App. | Flagged pairs are visible to the teacher with matching sections highlighted; students are not notified of flags; pairs below 90% are not flagged. |
 | AIS-04 | Autograding | Teacher-only. Suggest a grade for teacher review | Should | When an assignment is submitted, the AI Services container shall generate a suggested grade, surfaced only in the Teacher Web App for review before publishing. | Suggested grade is never auto-published without teacher confirmation, and is never shown to the student as-is. |
-| AIS-05 | AI-generated content detection | Detect likelihood a submission was AI-generated, distinct from internet plagiarism (AIS-02) | Must | When an assignment is submitted, the AI Services container shall estimate the likelihood it was AI-generated and report it to the teacher, surfaced only in the Teacher Web App. | Every text-based submission has an AI-likelihood score before the teacher grades it; score is not shown to the submitting student. |
+| AIS-05 | AI-generated content detection | Detect likelihood a submission was AI-generated, distinct from internet plagiarism (AIS-02) | Must | When an assignment is submitted, the AI Services container shall estimate the likelihood it was AI-generated and report it to the teacher, surfaced only in the Teacher Web App. | Every text-based submission has an AI-likelihood score before the teacher grades it; score is not shown to the submitting student; the UI presents the score as one signal alongside submission history, never as a standalone misconduct verdict (see Section 5 — false-positive risk is real and documented, especially against non-native English writers). |
 | AIS-06 | Automatic course extraction from syllabus PDF (future) | Extract course information automatically from an uploaded syllabus PDF | Won't | Where a syllabus PDF is uploaded, the AI Services container shall extract course information for use in the Course & Teacher Info view (SDA-18). | Extracted fields are shown to Admin/Teacher for confirmation before being published as course info — never auto-published unreviewed. |
 | AIS-07 | Suspicious behaviour & automation detection | Usage-pattern anomaly detection, scoped to class sessions and assignment windows only | Must | While a class session or assignment window is active, the AI Services container shall analyze usage-pattern telemetry (SDA-25) for suspicious behaviour or automation and flag anomalies, surfaced only in the Teacher Web App. | No analysis runs outside a class session or assignment window; flagged anomalies are never shown to the student. |
 
@@ -177,6 +177,7 @@
 | Institution may become a "Significant Data Fiduciary" under DPDP as scale grows (multi-college) | Regulatory (DPDP Act 2023) | Significant Data Fiduciaries face additional obligations, including annual Data Protection Impact Assessments — worth planning for as a milestone at scale, not a day-one requirement. |
 | Target institution is autonomous, not university-affiliated | Organizational | External/SEE marks are set and evaluated by the institution's own appointed examiners (TWA-17), not imported from an affiliating university. If this platform is later sold to an affiliated college, TWA-17 needs to become an import/sync feature against that university's exam system instead of a direct-entry form. |
 | Authorization Service is self-hosted OpenFGA, not a managed vendor | Technical | Decided: Permit.io's published free tier (1,000 users) falls well short of the required 20,000+ user floor, and WorkOS FGA's free-standing pricing (without also being an AuthKit customer, which was rejected) isn't confirmed generous enough to rely on. Self-hosting removes any user-count ceiling entirely. |
+| AI-content detection (AIS-05) has a documented, significant false-positive bias against non-native English writers | Fairness / Legal risk | Independent 2026 research found detectors misclassifying non-native English student writing at rates as high as 61% in some studies, against ~5% for native speakers — directly relevant since this platform's students write in a second language. AIS-05's acceptance criteria require the score to never stand alone as evidence; this is a product requirement, not just a vendor quality issue, and holds regardless of which detector is used. |
 
 ---
 
@@ -237,16 +238,16 @@ flowchart TB
 
 | Container | Responsibility | Tech Stack |
 |---|---|---|
-| Student Desktop App | Full-screen class lock, whitelisted browser, assignments, calendar, events, marks, community, embeds Shared Editor Kit and Direct Messaging | Avalonia (.NET/C#) — chosen over .NET MAUI specifically because MAUI has no official Linux desktop support (Microsoft has stated it's "not planned"), while Avalonia treats Linux as a first-class target alongside Windows and macOS, stays in the .NET ecosystem, and is actively maintained with frequent releases |
-| Teacher Web App | Timetable-aware dashboard, attendance, materials, assignment creation, marks, events, feedback, community, embeds Shared Editor Kit and Direct Messaging | TBD |
-| Admin Web App | Timetable generation/editing, fee links, event creation, group creation, account management, institution-wide visibility | TBD |
-| Parent Portal | Read-only ward attendance/marks, fee payment | TBD |
-| Backend API | Session-uniqueness enforcement, notification routing, group provisioning, material download, data model | TBD |
-| Database | System of record for accounts, groups, assignments, marks, attendance, timetable | TBD |
+| Student Desktop App | Full-screen class lock, whitelisted browser, assignments, calendar, events, marks, community, embeds Shared Editor Kit and Direct Messaging | Avalonia (.NET/C#), .NET 10 — targets Windows, Linux, and macOS (all with genuine app-level full-screen/app-switch enforcement); chosen over .NET MAUI specifically because MAUI has no official Linux desktop support |
+| Teacher Web App | Timetable-aware dashboard, attendance, materials, assignment creation, marks, events, feedback, community, embeds Shared Editor Kit and Direct Messaging | React + TypeScript + Vite, Tailwind + shadcn/ui, Framer Motion, TanStack Query, Recharts — API client generated from the Backend API's OpenAPI spec (Kiota/NSwag) to keep the type contract enforced across the language boundary |
+| Admin Web App | Timetable generation/editing, fee links, event creation, group creation, account management, institution-wide visibility | Same stack as Teacher Web App (React/TypeScript, shared component library) |
+| Parent Portal | Read-only ward attendance/marks, fee payment | Same stack as Teacher Web App (React/TypeScript, shared component library) |
+| Backend API | Session-uniqueness enforcement, notification routing, group provisioning, material download, data model | ASP.NET Core, .NET 10 (LTS, supported through Nov 2028) |
+| Database | System of record for accounts, groups, assignments, marks, attendance, timetable | PostgreSQL |
 | Authorization Service | Evaluates every permission check as a relationship-graph query; models College/Department/Role/User as a graph so multi-college tenancy is a graph boundary, not a hand-rolled `college_id` column everywhere | OpenFGA, self-hosted — decided over managed alternatives since Permit.io's free tier (1,000 users) falls well short of the 20,000+ user floor required |
-| AI Services | Plagiarism/copy-check, AI-content detection, autograding, browsing-history summary, future syllabus extraction | TBD |
+| AI Services | Plagiarism/copy-check, AI-content detection, autograding, browsing-history summary, future syllabus extraction | Split by stakes: **Copyleaks** (AIS-02, internet plagiarism — needs a real web index, not self-hostable, strong multilingual support) and **Pangram** (AIS-05, AI-content detection — benchmarked with the lowest false-positive rate of any evaluated detector, which matters given the bias risk noted in Section 5) are external services because getting these two *wrong* directly harms a student; AIS-03 (cross-class copy-check) uses a self-hosted open embedding-similarity model since it only compares your own students' submissions to each other, no internet index needed; AIS-01 (browsing summary) and AIS-04 (autograding suggestion, teacher-confirmed before publishing) use a self-hosted open-weight LLM since both are lower-stakes/advisory; AIS-07 (suspicious-behaviour detection) uses a lightweight self-hosted anomaly classifier on keystroke/mouse-timing telemetry, not an LLM at all |
 
-*(Remaining tech stack cells intentionally left TBD — not specified in the request; filling them in would be inventing scope.)*
+*(AIS-06 has no stack decision — it's Won't-priority/future, not built this round.)*
 
 ---
 
@@ -261,8 +262,8 @@ Broken out per container so work can be divided along these boundaries — see t
 flowchart TB
     subgraph SDA["Student Desktop App"]
         auth["Auth & Session Guard<br/>(SDA-02, SDA-23)"]
-        lock["Class-Time Lock<br/>(SDA-01, SDA-11, SDA-12, SDA-13)"]
-        browser["Whitelisted Browser<br/>(SDA-03, SDA-04)"]
+        lock["Class-Time Lock<br/>(SDA-01, SDA-11, SDA-12, SDA-13, SDA-25)"]
+        browser["Whitelisted Browser<br/>(SDA-03, SDA-04, SDA-08)"]
         assign["Assignments & Clipboard Security<br/>(SDA-10, SDA-21, SDA-22)"]
         calendar["Calendar & Events<br/>(SDA-14, SDA-20)"]
         community["Community & Groups<br/>(SDA-16, SDA-17, SDA-18)"]
@@ -288,12 +289,12 @@ Split into two clusters below rather than one 12+ node diagram — day-to-day te
 flowchart TB
     subgraph TWA["Teacher Web App"]
         section["Auth, Section Selector & Dashboard<br/>(TWA-01, TWA-02, TWA-03, TWA-04)"]
-        attmarks["Attendance & Marks<br/>(TWA-08, TWA-09, TWA-16, TWA-17)"]
+        attmarks["Attendance & Marks<br/>(TWA-08, TWA-09, TWA-16, TWA-17, TWA-20)"]
         materials["Materials & Assignments<br/>(TWA-06, TWA-07)"]
         calendar2["Calendar & Events<br/>(TWA-15)"]
         community2["Community<br/>(TWA-05)"]
-        ops["Ops & Feedback<br/>(TWA-10, TWA-11, TWA-12, TWA-13)"]
-        aipanel["AI Insights Panel<br/>(displays AIS-01..06)"]
+        ops["Ops & Feedback<br/>(TWA-10, TWA-11, TWA-12, TWA-13, TWA-19)"]
+        aipanel["AI Insights Panel<br/>(displays AIS-01..07)"]
     end
     sek2["Shared Editor Kit<br/>(TWA-14)"]:::shared
     dms2["Direct Messaging<br/>(TWA-18)"]:::shared
@@ -305,7 +306,7 @@ flowchart TB
     classDef shared stroke-dasharray: 5 5
 ```
 
-`AI Insights Panel` is display-only — it renders results computed by the `AI Services` container (Section 7); it runs no AI logic itself. This is where the permission-gated visibility rule for AIS-01 and the teacher-only rule for AIS-02/03/04/05 are enforced in the UI layer.
+`AI Insights Panel` is display-only — it renders results computed by the `AI Services` container (Section 7); it runs no AI logic itself. This is where the permission-gated visibility rule for AIS-01 and the teacher-only rule for AIS-02/03/04/05/07 are enforced in the UI layer.
 
 ### 8c. Admin Web App
 
@@ -318,6 +319,7 @@ flowchart TB
         records["Community & Records Access<br/>(AWA-06, AWA-07, AWA-08, AWA-12)"]
         accounts["Account Management<br/>(AWA-09, AWA-10)"]
         events["Event Creation<br/>(AWA-11)"]
+        rbac["Roles, Permissions & Departments<br/>(AWA-13, AWA-14)"]
     end
 ```
 
@@ -368,8 +370,30 @@ RBAC model finalized as a **Zanzibar-model relationship graph** (ReBAC) rather t
 | Lecturer | Department/section (their own) | `create_group`, `add_internal_marks`, `create_event`, mark attendance, upload materials, create assignments |
 | HoD | Department (their own) | Everything Lecturer has, plus `create_timetable` (department-scoped), `approve_external_marks` (department-scoped), `view_department_reports` |
 | Finance | Global (within College) | `manage_fees`, `view_all_fee_records` |
-| IT | Global (within College) | `manage_accounts`, `reset_password` |
+| IT | Global (within College) | `manage_accounts`, `reset_password`, `manage_roles_and_permissions` |
 | Admin | Global (within College) | Full permission set, including `manage_roles_and_permissions` (AWA-13) |
+
+**Full permission catalog** (gap fix — this was previously only "representative"; every permission referenced anywhere in Section 3 is now enumerated). Codes not listed here are inherent to a role rather than separately grantable (e.g. a student viewing their own marks needs no permission check, just authentication).
+
+| Permission code | Gates | Default holders |
+|---|---|---|
+| `create_group` | TWA-05, AWA-12 | Lecturer, HoD, Admin |
+| `create_event` | TWA-15, AWA-11 | Lecturer, HoD, Admin |
+| `add_internal_marks` | TWA-16 | Lecturer, HoD |
+| `add_external_marks` | TWA-17 | Nobody by default — time-bound `PermissionGrant` only, per TWA-17's own spec |
+| `approve_external_marks` | TWA-20 | HoD (department-scoped) |
+| `create_timetable` | AWA-01, AWA-03, TWA-19 | HoD (department-scoped), Admin (global); grantable to a specific Lecturer per TWA-19 |
+| `view_browsing_history` | AIS-01 | Admin only, via the full permission set — nobody else by default, matching AIS-01's "visible only to a role holding" design intent |
+| `manage_fees` | AWA-04, AWA-05 | Finance, Admin |
+| `view_all_fee_records` | — | Finance, Admin |
+| `manage_accounts` | AWA-09 | IT, Admin |
+| `reset_password` | AWA-10 | IT, Admin |
+| `manage_roles_and_permissions` | AWA-13 | Admin, IT |
+| `manage_departments` | AWA-14 | Admin |
+| `view_all_student_records` | AWA-07 | Admin |
+| `view_all_student_performance` | AWA-08 | Admin |
+| `view_all_groups` | TWA-05, AWA-06 | Lecturer, HoD, Admin |
+| `view_department_reports` | — | HoD (department-scoped) |
 
 ---
 
@@ -377,8 +401,6 @@ RBAC model finalized as a **Zanzibar-model relationship graph** (ReBAC) rather t
 
 | Question | Owner | Status |
 |---|---|---|
-| Full permission catalog beyond the representative list in Section 9 — needs enumerating against every feature in Section 3 before build | Ruthvik | Open |
-| Tech stack for Teacher Web App, Admin Web App, Parent Portal, Backend API, Database (Section 7) — SDA resolved to Avalonia; the rest still TBD | Ruthvik | Open |
 | Multi-college onboarding: decided as a manual step Ruthvik runs today, with internal automation tooling preferred over building a public self-serve signup flow — the automation itself still needs to be built and scoped | Ruthvik | Open |
 | **Data subject rights feature gap**: DPDP grants students/parents rights to access, correct, and request erasure of their data — no feature in Section 3 currently handles this as a formal request/response workflow; needs scoping (who fulfills it — Admin? IT?) before it can be a real feature | Ruthvik | Open |
 | **Consent/privacy notice at admission**: even where DPDP's educational-purpose exemption removes the *consent* requirement, a clear notice of what's collected and why is still good practice — decide whether this is in scope for this platform or handled separately by the institution's admission process | Ruthvik | Open |
@@ -403,3 +425,5 @@ RBAC model finalized as a **Zanzibar-model relationship graph** (ReBAC) rather t
 | 2026-07-04 | 0, 3, 5, 7, 9, 16 | Rolled back the assumption that AuthKit is adopted — SDA-02/TWA-03/API-01 reverted to the original custom-built design as the explicit default; AUTHN and its constraints reframed as evaluative-only, not committed | AUTHN, SDA-02, TWA-03, API-01 |
 | 2026-07-04 | 5, 16 | DPDP Act 2023 compliance pass: pinned GCS bucket to an India region (Mumbai/Delhi) instead of default multi-region, sidestepping cross-border-transfer rules; documented that AIS-01/AIS-07 already qualify under the educational-purpose exemption for behavioural monitoring of minors' data; flagged Significant Data Fiduciary DPIA obligation at multi-college scale; logged data-subject-rights (access/correct/erase) and grievance-officer feature gaps as open questions rather than inventing scope for them | — |
 | 2026-07-04 | 0, 3, 5, 7, 9, 16 | Resolved batch of open questions: API-01 kicks the old session; SDA-13 grace period is 20 minutes; SDA-04 whitelist approval is institution-wide; TWA-09 threshold is 65%; AIS-03 threshold is 90%; SEK-01 language list finalized; SDA tech stack decided as Avalonia (.NET) over MAUI (no official Linux support); AWA-13 delegable to Admin and IT; SDA-20/TWA-15/AWA-11 scoped by year/department; PRT-01 is Roll No + DOB only; Authorization Service decided as self-hosted OpenFGA (Permit.io's free tier fell short of the 20k-user floor); Authentication Service (AuthKit) evaluation concluded — rejected, AUTHN removed, custom Roll No/Password/TOTP flow finalized; multi-college onboarding stays a manual step with internal automation preferred | API-01, SDA-13, SDA-04, TWA-09, AIS-03, SEK-01, AWA-13, SDA-20, TWA-15, AWA-11, PRT-01, AUTHZ, SDA-02 |
+| 2026-07-04 | 0, 7, 16, 17 | Resolved remaining tech stack open question: Backend API on ASP.NET Core/.NET 10 (LTS), Postgres as Database; Teacher Web App/Admin Web App/Parent Portal on React+TypeScript (Tailwind, shadcn/ui, Framer Motion, TanStack Query, Recharts) with an OpenAPI-generated typed client bridging the C#/TS boundary; SDA's Avalonia target confirmed as Windows/Linux/macOS (iOS ruled out as a *desktop* target — it's a mobile OS requiring Apple's Automatic Assessment Configuration/MDM for any lockdown, which doesn't apply here) | API, DB, TWA, AWA, PRT, SDA |
+| 2026-07-04 | 5, 7, 9, 16 | Gap-fixing pass: built the full permission catalog (was only representative before); fixed IT role missing `manage_roles_and_permissions` despite AWA-13 explicitly naming IT as a holder; decided AI Services stack split by stakes (Copyleaks + Pangram external for plagiarism/AI-detection, self-hosted for lower-stakes autograding/summary/anomaly-detection); added a fairness constraint for AIS-05's documented false-positive bias against non-native English writers, with a hardened acceptance criterion requiring the score never stand alone as evidence; fixed four stale Section 8 diagrams that had drifted from Section 3 as features were added later (SDA-08/SDA-25 missing from 8a; TWA-19/TWA-20/AIS-07 missing from 8b; AWA-13/AWA-14 missing entirely from 8c) | AIS-05, all Section 8 diagrams |
