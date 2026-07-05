@@ -70,7 +70,11 @@ def compute_pairwise_similarity(
     # Preprocess/clean all submission contents
     cleaned_contents = [clean_code_or_text(sub["content"]) for sub in submissions]
     submission_ids = [sub["id"] for sub in submissions]
-    
+
+    if not any(cleaned_contents):
+        logger.info("Skipping similarity check: all submissions are empty after cleaning.")
+        return []
+
     try:
         # TF-IDF Vectorization
         # Use a token pattern that preserves alphanumeric tokens.

@@ -38,17 +38,11 @@ class SimilarityRequest(BaseModel):
         description="List of student submissions to check against each other"
     )
     threshold: Optional[float] = Field(
-        0.90, 
-        ge=0.0, 
-        le=1.0, 
+        0.90,
+        ge=0.0,
+        le=1.0,
         description="Cosine similarity threshold (default 0.90 / 90%)"
     )
-
-    @field_validator("submissions")
-    @classmethod
-    def must_have_at_least_two_submissions(cls, v: List[SubmissionItemSchema]) -> List[SubmissionItemSchema]:
-        # Allow sending fewer submissions, but note that similarity checks won't yield matches
-        return v
 
 class SimilarityMatchSchema(BaseModel):
     submission_a_id: str
