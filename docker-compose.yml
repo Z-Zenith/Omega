@@ -17,6 +17,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  ai-services:
+    build:
+      context: ./services/ai-services
+      dockerfile: Dockerfile
+    container_name: campus-ai-services
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   campus-pg-data:
