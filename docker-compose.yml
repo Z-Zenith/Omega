@@ -21,6 +21,7 @@ services:
     build:
       context: ./services/ai-services
       dockerfile: Dockerfile
+      target: runner
     container_name: campus-ai-services
     restart: unless-stopped
     ports:
@@ -30,6 +31,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Dev/CI-only image with pytest + tests/ baked in — not used at runtime.
+  # Run tests with: docker compose run --rm ai-services-test pytest
+  ai-services-test:
+    build:
+      context: ./services/ai-services
+      dockerfile: Dockerfile
+      target: test
+    profiles: ["test"]
 
   backend-api:
     build:
