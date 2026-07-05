@@ -18,6 +18,12 @@ obj/
 *.suo
 .vs/
 
+# Python (ai-services)
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
 # Environment & secrets
 .env
 .env.*

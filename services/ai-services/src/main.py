@@ -1,9 +1,11 @@
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.similarity import compute_pairwise_similarity, SubmissionItem, SimilarityMatch
+from src.anomaly import detect_suspicious_behaviour, TelemetryEvent, SuspiciousFlag
 
 # Configure logging
 logging.basicConfig(
@@ -21,6 +23,11 @@ app = FastAPI(
 
 # --- Pydantic Schemas ---
 
+def _require_non_empty(v: str) -> str:
+    if not v.strip():
+        raise ValueError("must not be empty or whitespace")
+    return v
+
 class SubmissionItemSchema(BaseModel):
     id: str = Field(..., description="Unique submission identifier")
     content: str = Field(..., description="Source code or text content of the submission")
@@ -28,9 +35,7 @@ class SubmissionItemSchema(BaseModel):
     @field_validator("id")
     @classmethod
     def id_must_not_be_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("id must not be empty or whitespace")
-        return v
+        return _require_non_empty(v)
 
 class SimilarityRequest(BaseModel):
     submissions: List[SubmissionItemSchema] = Field(
@@ -51,6 +56,70 @@ class SimilarityMatchSchema(BaseModel):
 
 class SimilarityResponse(BaseModel):
     matches: List[SimilarityMatchSchema]
+
+class TelemetryEventSchema(BaseModel):
+    student_id: str = Field(..., description="Student the event belongs to")
+    class_session_id: Optional[str] = Field(
+        None, description="Active class session the event occurred during, if any"
+    )
+    assignment_id: Optional[str] = Field(
+        None, description="Active assignment window the event occurred during, if any"
+    )
+    event_type: str = Field(
+        ...,
+        description="Telemetry event type, e.g. keystroke, paste, window_blur, window_focus, mouse_move"
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description="Event-specific detail, e.g. char_count for paste events"
+    )
+    recorded_at: datetime = Field(..., description="Client-reported event timestamp")
+
+    @field_validator("student_id", "event_type")
+    @classmethod
+    def field_must_not_be_empty(cls, v: str) -> str:
+        return _require_non_empty(v)
+
+    @field_validator("recorded_at")
+    @classmethod
+    def normalize_recorded_at(cls, v: datetime) -> datetime:
+        # Client timestamps may or may not carry a timezone offset. Normalizing to
+        # UTC here guarantees every event in a batch is mutually comparable — mixing
+        # naive and aware datetimes crashes the sort in the anomaly engine otherwise.
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def must_belong_to_a_window(self):
+        # AIS-07's acceptance criterion: "No analysis runs outside a class session or
+        # assignment window." An event tied to neither isn't valid telemetry for this
+        # endpoint — reject it here rather than silently scoring it.
+        if self.class_session_id is None and self.assignment_id is None:
+            raise ValueError("event must have a class_session_id or assignment_id")
+        return self
+
+class SuspiciousBehaviourRequest(BaseModel):
+    events: List[TelemetryEventSchema] = Field(
+        ...,
+        description="Usage telemetry recorded during an active class session or assignment window (SDA-25)"
+    )
+    min_confidence: Optional[float] = Field(
+        0.70,
+        ge=0.0,
+        le=1.0,
+        description="Minimum combined confidence score required to surface a flag (default 0.70)"
+    )
+
+class SuspiciousFlagSchema(BaseModel):
+    student_id: str
+    class_session_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+    confidence_score: float
+    reasons: List[str]
+
+class SuspiciousBehaviourResponse(BaseModel):
+    flags: List[SuspiciousFlagSchema]
 
 # --- Routes ---
 
@@ -92,4 +161,43 @@ async def check_similarity(payload: SimilarityRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to complete similarity comparison"
+        )
+
+@app.post(
+    "/api/v1/suspicious-behaviour",
+    response_model=SuspiciousBehaviourResponse,
+    status_code=status.HTTP_200_OK
+)
+async def check_suspicious_behaviour(payload: SuspiciousBehaviourRequest):
+    """
+    Analyzes usage-pattern telemetry (SDA-25) recorded during an active class session
+    or assignment window for signs of suspicious behaviour or automation. Callers are
+    responsible for only submitting telemetry gathered within an active window — this
+    endpoint scores whatever it is given and does not itself track window state.
+    """
+    try:
+        telemetry_data: List[TelemetryEvent] = [
+            {
+                "student_id": e.student_id,
+                "class_session_id": e.class_session_id,
+                "assignment_id": e.assignment_id,
+                "event_type": e.event_type,
+                "metadata": e.metadata,
+                "recorded_at": e.recorded_at,
+            }
+            for e in payload.events
+        ]
+
+        flags: List[SuspiciousFlag] = detect_suspicious_behaviour(
+            telemetry_data,
+            min_confidence=payload.min_confidence
+        )
+
+        return {"flags": flags}
+
+    except Exception as e:
+        logger.error(f"Internal error processing suspicious-behaviour request: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to complete suspicious-behaviour analysis"
         )
