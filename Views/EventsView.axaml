@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:conv="using:StudentDesktop.Converters"
+             xmlns:avconv="using:Avalonia.Data.Converters"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.EventsView"
+             x:DataType="vm:EventsViewModel">
+
+    <ScrollViewer>
+        <StackPanel Margin="20" Spacing="16">
+            <TextBlock Text="Events" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="Events open to your year and department (SDA-20). Registering adds it to your Calendar."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed" IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+
+            <ItemsControl ItemsSource="{Binding Events}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:EventItemViewModel">
+                        <Border Background="#F7F7F7" CornerRadius="6" Padding="12" Margin="0,0,0,8">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="{Binding Title}" FontWeight="Bold"/>
+                                    <TextBlock Text="{Binding StartTime, StringFormat='{}{0:MMM d, h:mm tt}'}" Foreground="Gray"/>
+                                    <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed"
+                                               IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="{Binding IsRegistered, Converter={x:Static conv:BoolToRegisterLabelConverter.Instance}}"
+                                        Command="{Binding RegisterCommand}" IsEnabled="{Binding !IsRegistered}"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>
