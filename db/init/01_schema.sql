@@ -1,0 +1,542 @@
+-- Campus Platform — PostgreSQL schema
+-- Mirrors docs/Schema.md Part 1.
+-- Loaded automatically by the official postgres image via /docker-entrypoint-initdb.d.
+
+BEGIN;
+
+-- ─── Extensions ────────────────────────────────────────────────────────────────
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";   -- gen_random_uuid()
+
+-- ─── Enums ─────────────────────────────────────────────────────────────────────
+DO $$ BEGIN
+    CREATE TYPE account_type AS ENUM ('student', 'teacher', 'admin_tier', 'parent');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE scope_kind AS ENUM ('global', 'department');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'late');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE assignment_type AS ENUM ('code', 'quiz', 'essay', 'file_upload');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE group_type AS ENUM ('class', 'subject_section', 'club', 'teacher_only');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE doc_type AS ENUM ('pdf', 'pptx', 'docx');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE notification_type AS ENUM (
+        'exit_ping', 'absence_ping', 'report', 'timetable_request',
+        'fee_reminder', 'whitelist_request', 'suspicious_flag'
+    );
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE fee_status AS ENUM ('pending', 'paid');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+    CREATE TYPE whitelist_request_status AS ENUM ('pending', 'approved', 'rejected');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ─── 1.1 Tenancy & Identity ────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS colleges (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        text NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS departments (
+    id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    college_id          uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    name                text NOT NULL,
+    hod_role_binding_id uuid  -- FK to role_bindings added after that table exists
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    college_id      uuid NOT NULL REFERENCES colleges(id) ON DELETE RESTRICT,
+    account_type    account_type NOT NULL,
+    identifier      text NOT NULL,
+    password_hash   text NOT NULL,
+    totp_secret     text,                   -- encrypted at the application layer
+    full_name       text NOT NULL,
+    department_id   uuid REFERENCES departments(id) ON DELETE SET NULL,
+    is_active       boolean NOT NULL DEFAULT true,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (college_id, identifier)
+);
+
+CREATE TABLE IF NOT EXISTS permissions (
+    code        text PRIMARY KEY,
+    description text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+    code                text PRIMARY KEY,
+    default_scope_kind  scope_kind NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS role_default_permissions (
+    role_code        text NOT NULL REFERENCES roles(code) ON DELETE CASCADE,
+    permission_code  text NOT NULL REFERENCES permissions(code) ON DELETE CASCADE,
+    PRIMARY KEY (role_code, permission_code)
+);
+
+CREATE TABLE IF NOT EXISTS role_bindings (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_code     text NOT NULL REFERENCES roles(code) ON DELETE RESTRICT,
+    scope_type    scope_kind NOT NULL,
+    department_id uuid REFERENCES departments(id) ON DELETE RESTRICT,
+    granted_at    timestamptz NOT NULL DEFAULT now(),
+    CHECK (
+        (scope_type = 'department' AND department_id IS NOT NULL) OR
+        (scope_type = 'global'     AND department_id IS NULL)
+    )
+);
+
+-- Now that role_bindings exists, wire up departments.hod_role_binding_id
+ALTER TABLE departments
+    ADD CONSTRAINT departments_hod_fk
+    FOREIGN KEY (hod_role_binding_id) REFERENCES role_bindings(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS permission_grants (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    permission_code text NOT NULL REFERENCES permissions(code) ON DELETE CASCADE,
+    granted         boolean NOT NULL,             -- true = additive, false = explicit revoke
+    expires_at      timestamptz,
+    granted_by      uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_permission_grants_user
+    ON permission_grants (user_id, permission_code);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_info text,
+    is_active   boolean NOT NULL DEFAULT true,   -- API-01: one active row per user
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_user_active_session
+    ON user_sessions (user_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user
+    ON user_sessions (user_id);
+
+-- ─── 1.2 Academic Structure ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS subjects (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    department_id uuid NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    code          text NOT NULL,
+    name          text NOT NULL,
+    teacher_id    uuid REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE (department_id, code)
+);
+
+CREATE TABLE IF NOT EXISTS sections (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    department_id uuid NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    year          int  NOT NULL,
+    name          text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sections_dept_year
+    ON sections (department_id, year);
+
+CREATE TABLE IF NOT EXISTS section_enrollments (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    section_id uuid NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+    student_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE (section_id, student_id)
+);
+
+CREATE TABLE IF NOT EXISTS teacher_section_assignments (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    teacher_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    section_id uuid NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+    subject_id uuid NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    UNIQUE (teacher_id, section_id, subject_id)
+);
+
+CREATE TABLE IF NOT EXISTS timetable_slots (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    section_id      uuid NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+    subject_id      uuid NOT NULL REFERENCES subjects(id) ON DELETE RESTRICT,
+    teacher_id      uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    day_of_week     int  NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+    start_time      time NOT NULL,
+    end_time        time NOT NULL,
+    room            text,
+    manually_edited boolean NOT NULL DEFAULT false,
+    CHECK (end_time > start_time)
+);
+CREATE INDEX IF NOT EXISTS idx_timetable_slots_section
+    ON timetable_slots (section_id, day_of_week, start_time);
+
+CREATE TABLE IF NOT EXISTS class_sessions (
+    id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    timetable_slot_id  uuid NOT NULL REFERENCES timetable_slots(id) ON DELETE CASCADE,
+    session_date       date NOT NULL,
+    actual_teacher_id  uuid REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE (timetable_slot_id, session_date)
+);
+
+-- ─── 1.3 Attendance ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS attendance_records (
+    id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_session_id uuid NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
+    student_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status           attendance_status NOT NULL,
+    marked_at        timestamptz NOT NULL DEFAULT now(),
+    marked_by        uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    UNIQUE (class_session_id, student_id)
+);
+
+-- ─── 1.4 Assignments & Submissions ────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS assignments (
+    id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    subject_id               uuid NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    teacher_id               uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    type                     assignment_type NOT NULL,
+    title                    text NOT NULL,
+    description              text,
+    due_date                 timestamptz NOT NULL,
+    submission_window_start  timestamptz NOT NULL,
+    submission_window_end    timestamptz NOT NULL,
+    type_specific_settings   jsonb,
+    CHECK (submission_window_end >= submission_window_start)
+);
+
+CREATE TABLE IF NOT EXISTS submissions (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    assignment_id     uuid NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+    student_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content_url       text NOT NULL,
+    submitted_at      timestamptz NOT NULL DEFAULT now(),
+    is_late           boolean NOT NULL DEFAULT false,
+    is_autosubmitted  boolean NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS idx_submissions_assignment
+    ON submissions (assignment_id, student_id);
+
+CREATE TABLE IF NOT EXISTS plagiarism_reports (
+    id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id      uuid NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    similarity_score   numeric NOT NULL,
+    copyleaks_scan_id  text,
+    matched_sources    jsonb,
+    checked_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS copy_check_flags (
+    id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_a_id   uuid NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    submission_b_id   uuid NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    similarity_score  numeric NOT NULL,
+    flagged_at        timestamptz NOT NULL DEFAULT now(),
+    CHECK (similarity_score >= 90),
+    CHECK (submission_a_id <> submission_b_id)
+);
+
+CREATE TABLE IF NOT EXISTS ai_detection_reports (
+    id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id       uuid NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    ai_likelihood_score numeric NOT NULL,
+    pangram_report_id   text,
+    checked_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS autograde_suggestions (
+    id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id          uuid NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    suggested_grade        numeric NOT NULL,
+    confirmed_by_teacher   boolean NOT NULL DEFAULT false,
+    confirmed_at           timestamptz
+);
+
+-- ─── 1.5 Marks ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS internal_marks (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id    uuid NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    assignment_id uuid REFERENCES assignments(id) ON DELETE SET NULL,
+    marks         numeric NOT NULL,
+    published     boolean NOT NULL DEFAULT false,
+    published_at  timestamptz,
+    published_by  uuid REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_internal_marks_student_subject
+    ON internal_marks (student_id, subject_id);
+
+CREATE TABLE IF NOT EXISTS external_marks (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subject_id    uuid NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    grade         text NOT NULL,
+    submitted_by  uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    submitted_at  timestamptz NOT NULL DEFAULT now(),
+    approved      boolean NOT NULL DEFAULT false,
+    approved_by   uuid REFERENCES users(id) ON DELETE SET NULL,
+    approved_at   timestamptz,
+    published     boolean NOT NULL DEFAULT false,
+    CHECK (
+        (approved = false AND approved_by IS NULL AND approved_at IS NULL) OR
+        (approved = true  AND approved_by IS NOT NULL AND approved_at IS NOT NULL)
+    ),
+    CHECK (published = false OR approved = true)  -- can only publish once approved
+);
+
+-- ─── 1.6 Community ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS groups (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    college_id  uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    type        group_type NOT NULL,
+    name        text NOT NULL,
+    created_by  uuid REFERENCES users(id) ON DELETE SET NULL,
+    section_id  uuid REFERENCES sections(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_groups_college ON groups (college_id);
+
+CREATE TABLE IF NOT EXISTS group_members (
+    id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id  uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (group_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS group_posts (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id   uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    author_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content    text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_group_posts_group
+    ON group_posts (group_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS materials (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    subject_id   uuid REFERENCES subjects(id) ON DELETE SET NULL,
+    group_id     uuid REFERENCES groups(id) ON DELETE SET NULL,
+    uploaded_by  uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    file_url     text NOT NULL,
+    title        text NOT NULL,
+    uploaded_at  timestamptz NOT NULL DEFAULT now(),
+    CHECK (subject_id IS NOT NULL OR group_id IS NOT NULL)  -- attached to one or both
+);
+
+-- ─── 1.7 Calendar & Events ────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS events (
+    id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    college_id             uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    title                  text NOT NULL,
+    start_time             timestamptz NOT NULL,
+    end_time               timestamptz NOT NULL,
+    created_by             uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    restricted_years       int[],
+    restricted_departments uuid[],
+    CHECK (end_time > start_time)
+);
+CREATE INDEX IF NOT EXISTS idx_events_college_time
+    ON events (college_id, start_time);
+
+CREATE TABLE IF NOT EXISTS event_registrations (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id      uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    student_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    registered_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (event_id, student_id)
+);
+
+CREATE TABLE IF NOT EXISTS todos (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title      text NOT NULL,
+    due_date   timestamptz,
+    completed  boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE IF NOT EXISTS custom_calendar_entries (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title      text NOT NULL,
+    entry_date date NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_custom_calendar_student
+    ON custom_calendar_entries (student_id, entry_date);
+
+-- ─── 1.8 Browser & Whitelist ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS whitelist_sites (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    college_id  uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    url         text NOT NULL,
+    approved_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (college_id, url)
+);
+
+CREATE TABLE IF NOT EXISTS whitelist_requests (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    url           text NOT NULL,
+    requested_by  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status        whitelist_request_status NOT NULL DEFAULT 'pending',
+    reviewed_by   uuid REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS browsing_history_summaries (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    summary_text  text NOT NULL,
+    generated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ─── 1.9 Shared Editor Kit (metadata only) ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS notes (
+    id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id         uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title            text NOT NULL,
+    content_markdown text NOT NULL DEFAULT '',
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    updated_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS note_links (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    from_note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    to_note_id   uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    UNIQUE (from_note_id, to_note_id),
+    CHECK (from_note_id <> to_note_id)
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    file_url    text NOT NULL,
+    doc_type    doc_type NOT NULL,
+    annotations jsonb
+);
+
+-- ─── 1.10 Direct Messaging ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS message_threads (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    teacher_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (student_id, teacher_id)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    thread_id uuid NOT NULL REFERENCES message_threads(id) ON DELETE CASCADE,
+    sender_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    content   text NOT NULL,
+    sent_at   timestamptz NOT NULL DEFAULT now(),
+    read_at   timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_messages_thread
+    ON messages (thread_id, sent_at);
+
+-- ─── 1.11 Notifications ──────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS notifications (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    recipient_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type         notification_type NOT NULL,
+    payload      jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at   timestamptz NOT NULL DEFAULT now(),
+    read_at      timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient
+    ON notifications (recipient_id, created_at DESC);
+
+-- ─── 1.12 Reports & Feedback ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS teacher_reports (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    teacher_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    section_id   uuid REFERENCES sections(id) ON DELETE SET NULL,
+    student_id   uuid REFERENCES users(id) ON DELETE SET NULL,
+    content      text NOT NULL,
+    submitted_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS section_feedback (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    teacher_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    section_id   uuid NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+    rating       int  NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comments     text,
+    submitted_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS teacher_feedback (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    teacher_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    rating       int  NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comments     text,
+    submitted_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS timetable_change_requests (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    teacher_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    description  text NOT NULL,
+    status       text NOT NULL DEFAULT 'pending',
+    requested_at timestamptz NOT NULL DEFAULT now(),
+    reviewed_by  uuid REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ─── 1.13 Fees ───────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS fee_records (
+    id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount       numeric NOT NULL,
+    due_date     date NOT NULL,
+    status       fee_status NOT NULL DEFAULT 'pending',
+    payment_link text,
+    paid_at      timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_fee_records_student
+    ON fee_records (student_id, status);
+
+CREATE TABLE IF NOT EXISTS payment_transactions (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    fee_record_id uuid NOT NULL REFERENCES fee_records(id) ON DELETE CASCADE,
+    gateway_txn_id text NOT NULL UNIQUE,
+    status        text NOT NULL,
+    processed_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- ─── 1.14 Suspicious Behaviour ───────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS usage_telemetry (
+    id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    class_session_id uuid REFERENCES class_sessions(id) ON DELETE SET NULL,
+    assignment_id    uuid REFERENCES assignments(id) ON DELETE SET NULL,
+    event_type       text NOT NULL,
+    metadata         jsonb NOT NULL DEFAULT '{}'::jsonb,
+    recorded_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_usage_telemetry_student_time
+    ON usage_telemetry (student_id, recorded_at DESC);
+
+CREATE TABLE IF NOT EXISTS suspicious_flags (
+    id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    class_session_id uuid REFERENCES class_sessions(id) ON DELETE SET NULL,
+    assignment_id    uuid REFERENCES assignments(id) ON DELETE SET NULL,
+    confidence_score numeric NOT NULL,
+    flagged_at       timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_suspicious_flags_student
+    ON suspicious_flags (student_id, flagged_at DESC);
+
+COMMIT;
