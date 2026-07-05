@@ -118,6 +118,7 @@ public partial class AppDbContext : DbContext
             .HasPostgresEnum<FeeStatus>()
             .HasPostgresEnum<GroupType>()
             .HasPostgresEnum<NotificationType>()
+            .HasPostgresEnum<OcrStatus>()
             .HasPostgresEnum<ScopeKind>()
             .HasPostgresEnum<WhitelistRequestStatus>()
             .HasPostgresExtension("pgcrypto");
@@ -243,6 +244,7 @@ public partial class AppDbContext : DbContext
 
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.DocType).HasColumnType("doc_type");
+            entity.Property(e => e.OcrStatus).HasColumnType("ocr_status");
 
             entity.HasOne(d => d.Owner).WithMany(p => p.Documents).HasConstraintName("documents_owner_id_fkey");
         });
@@ -426,6 +428,7 @@ public partial class AppDbContext : DbContext
             entity.HasKey(e => e.Id).HasName("note_links_pkey");
 
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
             entity.HasOne(d => d.FromNote).WithMany(p => p.NoteLinkFromNotes).HasConstraintName("note_links_from_note_id_fkey");
 

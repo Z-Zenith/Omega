@@ -20,6 +20,12 @@ public partial class NoteLink
     [Column("to_note_id")]
     public Guid ToNoteId { get; set; }
 
+    [Column("anchor")]
+    public string Anchor { get; set; } = null!;
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; }
+
     [ForeignKey("FromNoteId")]
     [InverseProperty("NoteLinkFromNotes")]
     public virtual Note FromNote { get; set; } = null!;

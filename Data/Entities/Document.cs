@@ -22,6 +22,9 @@ public partial class Document
     [Column("annotations", TypeName = "jsonb")]
     public string? Annotations { get; set; }
 
+    [Column("page_count")]
+    public int? PageCount { get; set; }
+
     [ForeignKey("OwnerId")]
     [InverseProperty("Documents")]
     public virtual User Owner { get; set; } = null!;
