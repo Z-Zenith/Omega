@@ -17,6 +17,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  ai-services:
+    build:
+      context: ./services/ai-services
+      dockerfile: Dockerfile
+      target: runner
+    container_name: campus-ai-services
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Dev/CI-only image with pytest + tests/ baked in — not used at runtime.
+  # Run tests with: docker compose run --rm ai-services-test pytest
+  ai-services-test:
+    build:
+      context: ./services/ai-services
+      dockerfile: Dockerfile
+      target: test
+    profiles: ["test"]
 
   backend-api:
     build:
@@ -41,16 +64,6 @@ services:
       - "127.0.0.1:8082:3000" # Playground UI, dev convenience only
     # No healthcheck: the openfga image ships no shell/wget/curl to probe with.
     # `curl http://localhost:8081/healthz` from the host confirms liveness instead.
-
-  ai-services:
-    build:
-      context: ./services/ai-services
-    container_name: campus-ai-services
-    restart: unless-stopped
-    # Stub only — Track 2 owns the real implementation (self-hosted models
-    # for AIS-01/03/04/07, Copyleaks/Pangram for AIS-02/05).
-    ports:
-      - "8090:8000"
 
   judge0-db:
     image: postgres:16-alpine
