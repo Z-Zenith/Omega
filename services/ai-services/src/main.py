@@ -1,8 +1,8 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.similarity import compute_pairwise_similarity, SubmissionItem, SimilarityMatch
 from src.anomaly import detect_suspicious_behaviour, TelemetryEvent, SuspiciousFlag
@@ -23,6 +23,11 @@ app = FastAPI(
 
 # --- Pydantic Schemas ---
 
+def _require_non_empty(v: str) -> str:
+    if not v.strip():
+        raise ValueError("must not be empty or whitespace")
+    return v
+
 class SubmissionItemSchema(BaseModel):
     id: str = Field(..., description="Unique submission identifier")
     content: str = Field(..., description="Source code or text content of the submission")
@@ -30,9 +35,7 @@ class SubmissionItemSchema(BaseModel):
     @field_validator("id")
     @classmethod
     def id_must_not_be_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("id must not be empty or whitespace")
-        return v
+        return _require_non_empty(v)
 
 class SimilarityRequest(BaseModel):
     submissions: List[SubmissionItemSchema] = Field(
@@ -75,9 +78,26 @@ class TelemetryEventSchema(BaseModel):
     @field_validator("student_id", "event_type")
     @classmethod
     def field_must_not_be_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("must not be empty or whitespace")
-        return v
+        return _require_non_empty(v)
+
+    @field_validator("recorded_at")
+    @classmethod
+    def normalize_recorded_at(cls, v: datetime) -> datetime:
+        # Client timestamps may or may not carry a timezone offset. Normalizing to
+        # UTC here guarantees every event in a batch is mutually comparable — mixing
+        # naive and aware datetimes crashes the sort in the anomaly engine otherwise.
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def must_belong_to_a_window(self):
+        # AIS-07's acceptance criterion: "No analysis runs outside a class session or
+        # assignment window." An event tied to neither isn't valid telemetry for this
+        # endpoint — reject it here rather than silently scoring it.
+        if self.class_session_id is None and self.assignment_id is None:
+            raise ValueError("event must have a class_session_id or assignment_id")
+        return self
 
 class SuspiciousBehaviourRequest(BaseModel):
     events: List[TelemetryEventSchema] = Field(
