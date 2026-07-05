@@ -412,7 +412,8 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 ## Open Items (mirror Section 16 of the architecture doc)
 
 - Data-subject-rights workflow (access/correct/erase) has no table yet — add one once that feature is scoped.
-- **Documents Title field**: Is the `DocumentDescriptor.title` field in the Shared Editor Kit meant to be derived from the `file_url`/filename by the host application (embedder) rather than stored separately as a database column in the `documents` table?
+- **Documents Title field**: `DocumentDescriptor.title` in the Shared Editor Kit is now optional (not backed by a `documents` column) until this is resolved. Still open: should title be (a) added as a stored column, or (b) derived from `file_url`/filename by the embedder? Whichever wins, `title` in the SEK interface should be revisited (made required again, or removed in favor of an embedder-side helper).
+- **Contract-change sign-off pending**: the `note_links`/`documents` column additions below (`anchor`, `created_at`, `page_count`, `ocr_status`) are a DB schema change per the contract-change rule in the repo CLAUDE.md — this needs a shared-log post and a thumbs-up from the other track before merge. Not yet posted as of this changelog entry.
 
 ~~Full permission-code catalog~~ — resolved; `permissions` and `role_default_permissions` tables added, seeded from architecture doc Section 9.
 ~~AI Services provider~~ — resolved; Copyleaks (AIS-02) and Pangram (AIS-05) as external services for the two stakes-sensitive detectors, self-hosted models for AIS-01/03/04/07.
@@ -424,3 +425,4 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | Date | Section(s) touched | Change | ID(s) affected |
 |---|---|---|---|
 | 2026-07-05 | 1.9, Open Items | Fixed two schema mismatches against TS interfaces: added `anchor` and `created_at` to `note_links` (SEK-03); added `page_count` and `ocr_status` to `documents` (SEK-02); added open question regarding document title derivation. | SEK-02, SEK-03 |
+| 2026-07-05 | Open Items | Code review follow-up: flagged this schema change as pending shared-log sign-off per the contract-change rule; noted `DocumentDescriptor.title` was made optional in the SEK interface to match the still-unresolved title-derivation question. | SEK-02 |
