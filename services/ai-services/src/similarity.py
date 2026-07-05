@@ -27,11 +27,11 @@ def clean_code_or_text(content: str) -> str:
     # 1. Strip Python/Shell single-line comments (#)
     # Be careful not to strip # inside quotes (approximate rule for speed and safety)
     content = re.sub(r'(?m)^[ \t]*#.*$', '', content)  # Full-line comments
-    content = re.sub(r'(?<=[^\'"] )#.*$', '', content)  # Inline comments with leading space
+    content = re.sub(r'(?m)(?<=[^\'"] )#.*$', '', content)  # Inline comments with leading space
 
     # 2. Strip C-style single line comments (//)
     content = re.sub(r'(?m)^[ \t]*//.*$', '', content)
-    content = re.sub(r'(?<=[^\'"] )//.*$', '', content)
+    content = re.sub(r'(?m)(?<=[^\'"] )//.*$', '', content)
 
     # 3. Strip C-style multi-line comments (/* */)
     content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
