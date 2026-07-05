@@ -6,4 +6,7 @@ public partial class Document
 {
     [Column("doc_type")]
     public DocType DocType { get; set; }
+
+    [Column("ocr_status")]
+    public OcrStatus OcrStatus { get; set; }
 }

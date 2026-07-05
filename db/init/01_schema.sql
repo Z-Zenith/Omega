@@ -47,6 +47,10 @@ DO $$ BEGIN
     CREATE TYPE whitelist_request_status AS ENUM ('pending', 'approved', 'rejected');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+DO $$ BEGIN
+    CREATE TYPE ocr_status AS ENUM ('pending', 'processing', 'completed', 'failed', 'not_applicable');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- ─── 1.1 Tenancy & Identity ────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS colleges (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -415,6 +419,8 @@ CREATE TABLE IF NOT EXISTS note_links (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     from_note_id uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
     to_note_id   uuid NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    anchor       text NOT NULL,
+    created_at   timestamptz NOT NULL DEFAULT now(),
     UNIQUE (from_note_id, to_note_id),
     CHECK (from_note_id <> to_note_id)
 );
@@ -424,7 +430,9 @@ CREATE TABLE IF NOT EXISTS documents (
     owner_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     file_url    text NOT NULL,
     doc_type    doc_type NOT NULL,
-    annotations jsonb
+    annotations jsonb,
+    page_count  int,
+    ocr_status  ocr_status NOT NULL DEFAULT 'pending'
 );
 
 -- ─── 1.10 Direct Messaging ───────────────────────────────────────────────────
