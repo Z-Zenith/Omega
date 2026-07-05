@@ -1,0 +1,53 @@
+model
+  schema 1.1
+
+# Mirrors architecture doc Section 9's ReBAC design: College is the tenant
+# boundary, RoleBinding is either global (within the College) or scoped to a
+# Department, and PermissionGrant is an additive/time-bound override on top
+# of role defaults. Expiry on PermissionGrant-style tuples (add_external_marks,
+# create_timetable grants) is enforced by Backend API syncing tuples against
+# permission_grants.expires_at — OpenFGA itself just answers "does this tuple
+# exist right now."
+
+type user
+
+type college
+  relations
+    define finance: [user]
+    define it: [user]
+    define admin: [user]
+    define lecturer: [user]
+    define hod: [user]
+
+    define manage_fees: finance or admin
+    define view_all_fee_records: finance or admin
+    define manage_accounts: it or admin
+    define reset_password: it or admin
+    define manage_roles_and_permissions: admin or it
+    define manage_departments: admin
+    define view_all_student_records: admin
+    define view_all_student_performance: admin
+    define view_browsing_history: admin
+    define view_all_groups: lecturer or hod or admin
+    define create_group: lecturer or hod or admin
+    define create_event: lecturer or hod or admin
+
+type department
+  relations
+    define college: [college]
+    define lecturer: [user]
+    define hod: [user]
+
+    # PermissionGrant-backed relations — additive only, no role grants these
+    # by default (add_external_marks per TWA-17's spec; create_timetable can
+    # also be extended to a specific Lecturer per TWA-19).
+    define add_external_marks_grant: [user]
+    define create_timetable_grant: [user]
+
+    define create_group: lecturer or hod or admin from college
+    define create_event: lecturer or hod or admin from college
+    define add_internal_marks: lecturer or hod
+    define add_external_marks: add_external_marks_grant
+    define approve_external_marks: hod
+    define create_timetable: hod or create_timetable_grant or admin from college
+    define view_department_reports: hod
