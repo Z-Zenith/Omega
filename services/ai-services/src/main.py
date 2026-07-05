@@ -1,9 +1,11 @@
 import logging
+from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
 from src.similarity import compute_pairwise_similarity, SubmissionItem, SimilarityMatch
+from src.anomaly import detect_suspicious_behaviour, TelemetryEvent, SuspiciousFlag
 
 # Configure logging
 logging.basicConfig(
@@ -52,6 +54,53 @@ class SimilarityMatchSchema(BaseModel):
 class SimilarityResponse(BaseModel):
     matches: List[SimilarityMatchSchema]
 
+class TelemetryEventSchema(BaseModel):
+    student_id: str = Field(..., description="Student the event belongs to")
+    class_session_id: Optional[str] = Field(
+        None, description="Active class session the event occurred during, if any"
+    )
+    assignment_id: Optional[str] = Field(
+        None, description="Active assignment window the event occurred during, if any"
+    )
+    event_type: str = Field(
+        ...,
+        description="Telemetry event type, e.g. keystroke, paste, window_blur, window_focus, mouse_move"
+    )
+    metadata: dict = Field(
+        default_factory=dict,
+        description="Event-specific detail, e.g. char_count for paste events"
+    )
+    recorded_at: datetime = Field(..., description="Client-reported event timestamp")
+
+    @field_validator("student_id", "event_type")
+    @classmethod
+    def field_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must not be empty or whitespace")
+        return v
+
+class SuspiciousBehaviourRequest(BaseModel):
+    events: List[TelemetryEventSchema] = Field(
+        ...,
+        description="Usage telemetry recorded during an active class session or assignment window (SDA-25)"
+    )
+    min_confidence: Optional[float] = Field(
+        0.70,
+        ge=0.0,
+        le=1.0,
+        description="Minimum combined confidence score required to surface a flag (default 0.70)"
+    )
+
+class SuspiciousFlagSchema(BaseModel):
+    student_id: str
+    class_session_id: Optional[str] = None
+    assignment_id: Optional[str] = None
+    confidence_score: float
+    reasons: List[str]
+
+class SuspiciousBehaviourResponse(BaseModel):
+    flags: List[SuspiciousFlagSchema]
+
 # --- Routes ---
 
 @app.get("/", status_code=status.HTTP_200_OK)
@@ -92,4 +141,43 @@ async def check_similarity(payload: SimilarityRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to complete similarity comparison"
+        )
+
+@app.post(
+    "/api/v1/suspicious-behaviour",
+    response_model=SuspiciousBehaviourResponse,
+    status_code=status.HTTP_200_OK
+)
+async def check_suspicious_behaviour(payload: SuspiciousBehaviourRequest):
+    """
+    Analyzes usage-pattern telemetry (SDA-25) recorded during an active class session
+    or assignment window for signs of suspicious behaviour or automation. Callers are
+    responsible for only submitting telemetry gathered within an active window — this
+    endpoint scores whatever it is given and does not itself track window state.
+    """
+    try:
+        telemetry_data: List[TelemetryEvent] = [
+            {
+                "student_id": e.student_id,
+                "class_session_id": e.class_session_id,
+                "assignment_id": e.assignment_id,
+                "event_type": e.event_type,
+                "metadata": e.metadata,
+                "recorded_at": e.recorded_at,
+            }
+            for e in payload.events
+        ]
+
+        flags: List[SuspiciousFlag] = detect_suspicious_behaviour(
+            telemetry_data,
+            min_confidence=payload.min_confidence
+        )
+
+        return {"flags": flags}
+
+    except Exception as e:
+        logger.error(f"Internal error processing suspicious-behaviour request: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to complete suspicious-behaviour analysis"
         )
