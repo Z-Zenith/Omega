@@ -66,7 +66,9 @@ def detect_suspicious_behaviour(
     flags: List[SuspiciousFlag] = []
     for (student_id, class_session_id, assignment_id), window_events in windows.items():
         score, reasons = _score_window(window_events)
-        if score >= min_confidence:
+        # Require at least one triggered heuristic — otherwise a min_confidence of 0.0
+        # would flag every window, including one with zero evidence.
+        if reasons and score >= min_confidence:
             logger.warning(
                 f"Suspicious behaviour flagged: student={student_id} "
                 f"session={class_session_id} assignment={assignment_id} "
