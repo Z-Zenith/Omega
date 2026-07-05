@@ -15,22 +15,35 @@
  *     basic OCR") — other doc types are view-only.
  */
 
-import type { Result, SekError, UserContext } from '../types/common.js';
+import type { InkStroke, Result, SekError, UserContext } from '../types/common.js';
 
 /** Document types supported at launch. Adding one is a contract change. */
 export type DocumentType = 'pdf' | 'pptx' | 'docx';
+
+/**
+ * OCR lifecycle state, mirroring the `documents.ocr_status` column
+ * (docs/campus-platform-db-api-schema.md Section 1.9). PDF only —
+ * `not_applicable` for pptx/docx.
+ */
+export type OcrStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'not_applicable';
 
 /** Per-document-type metadata. */
 export interface DocumentDescriptor {
   readonly id: string;
   readonly type: DocumentType;
-  readonly title: string;
+  /**
+   * Display title. Optional: the `documents` table has no `title` column
+   * today (see db-api-schema.md Open Items — whether this should be
+   * derived from `fileUrl` by the embedder is still an open question).
+   * Embedders must not assume a round-trippable, persisted title yet.
+   */
+  readonly title?: string;
   /** GCS / object-store URL the embedder resolves through the Backend API (API-03). */
   readonly fileUrl: string;
   /** Page count, if known. PDF only. */
   readonly pageCount?: number;
-  /** Whether OCR has been run on this document. PDF only. */
-  readonly ocrApplied?: boolean;
+  /** OCR lifecycle state. PDF only; `not_applicable` for pptx/docx. */
+  readonly ocrStatus?: OcrStatus;
 }
 
 /** Annotation is PDF-only per the spec. Other doc types are view-only. */
@@ -80,16 +93,6 @@ export interface InkAnnotation {
   readonly strokes: ReadonlyArray<InkStroke>;
   readonly createdAt: string;
   readonly createdBy: string;
-}
-
-/**
- * One stroke is a sequence of points in normalized 0..1 page space.
- * SEK-05 will reuse the same shape for vector shape data.
- */
-export interface InkStroke {
-  readonly color: string;
-  readonly width: number; // in CSS pixels at 1x zoom
-  readonly points: ReadonlyArray<{ readonly x: number; readonly y: number }>;
 }
 
 /** Result of a single OCR pass on a page. */

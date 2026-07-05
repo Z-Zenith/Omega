@@ -18,9 +18,9 @@
  *   - SEK-03 (Markdown notes)         — Must — interface defined in this PR.
  *   - SEK-04 (Built-in image search)  — Could — interface defined in this PR.
  *   - SEK-05 (Inking w/ diagrams)     — Won't — deliberately NOT defined here.
- *                                       Will reuse InkStroke from SEK-02 when
- *                                       promoted. Adding it now would be
- *                                       contract drift.
+ *                                       Will reuse the InkStroke primitive
+ *                                       (types/common.ts) when promoted.
+ *                                       Adding it now would be contract drift.
  *
  * Consumers:
  *   - apps/teacher-web     (TWA) — imports the TS interfaces directly.
@@ -35,7 +35,6 @@
  */
 
 export type {
-  Id,
   UserContext,
   Result,
   SekError,
@@ -43,6 +42,7 @@ export type {
   ReadCallback,
   WriteCallback,
   DeleteCallback,
+  InkStroke,
 } from './types/common.js';
 
 // SEK-01 — Code editor
@@ -58,12 +58,12 @@ export { LANGUAGE_LABELS } from './code-editor/index.js';
 // SEK-02 — Document viewer & annotator
 export type {
   DocumentType,
+  OcrStatus,
   DocumentDescriptor,
   Annotation,
   HighlightAnnotation,
   TextBoxAnnotation,
   InkAnnotation,
-  InkStroke,
   OcrPageResult,
   DocumentViewerProps,
   DocumentViewerApi,

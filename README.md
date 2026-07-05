@@ -12,7 +12,7 @@ Public TypeScript interface for the **Shared Editor Kit (SEK)** — the cross-co
 | [SEK-02](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Document viewer & annotator (PDF/PPTX/DOCX, highlights/textboxes/ink, OCR) | Interface only |
 | [SEK-03](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Markdown notes (Obsidian-style linked notes) | Interface only |
 | [SEK-04](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Built-in image search (inside the notes editor) | Interface only |
-| [SEK-05](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Inking w/ block diagrams | **Not defined** — Won't priority; will reuse `InkStroke` from SEK-02 when promoted |
+| [SEK-05](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Inking w/ block diagrams | **Not defined** — Won't priority; will reuse the shared `InkStroke` primitive when promoted |
 
 ## Consumers
 
@@ -54,7 +54,7 @@ These are the non-obvious decisions that came from the EARS requirements and acc
 4. **Wikilink resolution is `Result<Note, SekError>`, not a thrown exception.** This is the contract that backs SEK-03's "links resolve to not-found, not a crash" acceptance criterion.
 5. **Image search returns a `content-addressed` URL, not the original `sourceUrl`.** This is the contract for SEK-04's "inserted image is embedded, not just linked" acceptance criterion. The embedder's `onUploadImage` is the step that makes the image survive the source going away.
 6. **Annotation coordinates are normalized 0..1.** Survives zoom, retina displays, and PDF re-renders. The renderer in the embedder multiplies by the rendered page size.
-7. **`InkStroke` is a vector primitive.** When SEK-05 gets promoted from Won't, it will reuse this same shape for vector shape data ("stored as vector shapes, not raster ink").
+7. **`InkStroke` is a vector primitive, defined in `types/common.ts`** (not `document-viewer`) precisely so SEK-05 can import it without reaching into SEK-02's module. When SEK-05 gets promoted from Won't, it will reuse this same shape for vector shape data ("stored as vector shapes, not raster ink").
 
 ## Contract change protocol
 

@@ -4,14 +4,15 @@
  */
 export type {
   DocumentType,
+  OcrStatus,
   DocumentDescriptor,
   Annotation,
   HighlightAnnotation,
   TextBoxAnnotation,
   InkAnnotation,
-  InkStroke,
   OcrPageResult,
   DocumentViewerProps,
   DocumentViewerApi,
   AnnotationChange,
 } from './types.js';
+export type { InkStroke } from '../types/common.js';

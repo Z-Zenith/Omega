@@ -63,24 +63,13 @@ import type {
 } from '../src/types/common.js';
 
 // ---- Exhaustiveness checks: every Language has a label, no extras ----
+// Record<Language, string> forces LANGUAGE_LABELS to have exactly one key per
+// Language literal — deriving the literal list from its keys (rather than
+// hand-listing it a second time) keeps this check honest as Language grows.
 const _exhaustiveLanguage: Record<Language, string> = LANGUAGE_LABELS;
 void _exhaustiveLanguage;
 
-const _allLanguageLiterals: Language[] = [
-  'c',
-  'cpp',
-  'python',
-  'java',
-  'dotnet',
-  'html',
-  'css',
-  'javascript',
-  'typescript',
-  'nodejs',
-  'sql',
-  'json',
-  'yaml',
-];
+const _allLanguageLiterals: Language[] = Object.keys(LANGUAGE_LABELS) as Language[];
 void _allLanguageLiterals;
 
 // ---- Result<T,E> discriminated union narrows correctly ----
@@ -155,42 +144,29 @@ void _codeApi;
 void _viewerApi;
 void _notesApi;
 
-// Type-only re-exports compile (these would fail if any barrel broke)
-type _UC2 = UC;
-type _Res2 = Res<string, SE>;
-type _NoteLinkAlias = NoteLink;
-type _HighlightAlias = HighlightAnnotation;
-type _TextBoxAlias = TextBoxAnnotation;
-type _InkAlias = InkAnnotation;
-type _StrokeAlias = InkStroke;
-type _OcrAlias = OcrPageResult;
-type _DocDescAlias = DocumentDescriptor;
-type _CodeSrcAlias = CodeSource;
-type _CodeRunAlias = CodeRunResult;
-type _BacklinksAlias = Backlinks;
-type _OutgoingAlias = OutgoingLinks;
-type _SearchResultAlias = ImageSearchResult;
-type _SearchResponseAlias = ImageSearchResponse;
-type _DVP2 = DVP;
-type _NEP2 = NEP;
-type _ISP2 = ISP;
-type _CEP2 = CEP;
-void (null as unknown as _UC2);
-void (null as unknown as _Res2);
-void (null as unknown as _NoteLinkAlias);
-void (null as unknown as _HighlightAlias);
-void (null as unknown as _TextBoxAlias);
-void (null as unknown as _InkAlias);
-void (null as unknown as _StrokeAlias);
-void (null as unknown as _OcrAlias);
-void (null as unknown as _DocDescAlias);
-void (null as unknown as _CodeSrcAlias);
-void (null as unknown as _CodeRunAlias);
-void (null as unknown as _BacklinksAlias);
-void (null as unknown as _OutgoingAlias);
-void (null as unknown as _SearchResultAlias);
-void (null as unknown as _SearchResponseAlias);
-void (null as unknown as _DVP2);
-void (null as unknown as _NEP2);
-void (null as unknown as _ISP2);
-void (null as unknown as _CEP2);
+// Type-only re-exports compile (this would fail if any barrel or subpath
+// export broke) — one field per symbol instead of a separate alias + void
+// pair each, since referencing them all in one type position is enough to
+// force resolution.
+declare const _barrelExports: {
+  uc: UC;
+  res: Res<string, SE>;
+  noteLink: NoteLink;
+  highlight: HighlightAnnotation;
+  textBox: TextBoxAnnotation;
+  ink: InkAnnotation;
+  stroke: InkStroke;
+  ocr: OcrPageResult;
+  docDesc: DocumentDescriptor;
+  codeSrc: CodeSource;
+  codeRun: CodeRunResult;
+  backlinks: Backlinks;
+  outgoing: OutgoingLinks;
+  searchResult: ImageSearchResult;
+  searchResponse: ImageSearchResponse;
+  dvp: DVP;
+  nep: NEP;
+  isp: ISP;
+  cep: CEP;
+};
+void _barrelExports;

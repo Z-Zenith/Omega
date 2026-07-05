@@ -9,9 +9,6 @@
  * Feature IDs reference: docs/Campus platform architecture.md, Section 3 (SEK-01..05).
  */
 
-/** Branded UUID string for any persisted SEK entity. */
-export type Id<TBrand extends string> = string & { readonly __brand: TBrand };
-
 /** Opaque, embedder-supplied authentication context. SEK never opens a session itself. */
 export interface UserContext {
   /** Stable per-user ID from the host application's auth layer. */
@@ -59,3 +56,14 @@ export type WriteCallback<TEntity> = (entity: TEntity) => Promise<Result<TEntity
 
 /** Async delete callback the embedder supplies so SEK doesn't own persistence. */
 export type DeleteCallback = (id: string) => Promise<Result<void>>;
+
+/**
+ * One stroke is a sequence of points in normalized 0..1 page space. Lives
+ * here (not in document-viewer) because SEK-05 (inking w/ diagrams) will
+ * reuse this same vector primitive when it's promoted from Won't.
+ */
+export interface InkStroke {
+  readonly color: string;
+  readonly width: number; // in CSS pixels at 1x zoom
+  readonly points: ReadonlyArray<{ readonly x: number; readonly y: number }>;
+}
