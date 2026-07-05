@@ -2,20 +2,29 @@
 CLAUDE.md
 AGENTS.md
 
-# .NET
+# Node / TypeScript packages (shared-editor-kit, direct-messaging, web apps)
+node_modules/
+dist/
+.next/
+out/
+*.tsbuildinfo
+.pnpm-store/
+.vite/
+
+# .NET / Avalonia (student-desktop, backend-api, ai-services)
 bin/
 obj/
 *.user
-
-# Node / web apps
-node_modules/
-dist/
-.vite/
-
-# Avalonia / IDE
-.vs/
 *.suo
+.vs/
 
-# Environment
+# Environment & secrets
 .env
-.env.local
+.env.*
+!.env.example
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
