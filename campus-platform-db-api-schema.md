@@ -269,8 +269,8 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 ### 1.9 Shared Editor Kit (metadata only — file bytes live in GCS)
 
 **`notes`** — `id`, `owner_id` FK → users, `title`, `content_markdown`, `created_at`, `updated_at` (SEK-03)
-**`note_links`** — `id`, `from_note_id` FK, `to_note_id` FK
-**`documents`** — `id`, `owner_id` FK, `file_url`, `doc_type` enum(pdf, pptx, docx), `annotations` jsonb (SEK-02)
+**`note_links`** — `id`, `from_note_id` FK, `to_note_id` FK, `anchor` text (not null), `created_at` timestamptz (not null, default now()) (SEK-03)
+**`documents`** — `id`, `owner_id` FK, `file_url`, `doc_type` enum(pdf, pptx, docx), `annotations` jsonb, `page_count` int (nullable), `ocr_status` enum/text(pending, processing, completed, failed, not_applicable) (not null, default pending) (SEK-02)
 
 ### 1.10 Direct Messaging
 
@@ -412,6 +412,15 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 ## Open Items (mirror Section 16 of the architecture doc)
 
 - Data-subject-rights workflow (access/correct/erase) has no table yet — add one once that feature is scoped.
+- **Documents Title field**: Is the `DocumentDescriptor.title` field in the Shared Editor Kit meant to be derived from the `file_url`/filename by the host application (embedder) rather than stored separately as a database column in the `documents` table?
 
 ~~Full permission-code catalog~~ — resolved; `permissions` and `role_default_permissions` tables added, seeded from architecture doc Section 9.
 ~~AI Services provider~~ — resolved; Copyleaks (AIS-02) and Pangram (AIS-05) as external services for the two stakes-sensitive detectors, self-hosted models for AIS-01/03/04/07.
+
+---
+
+## Changelog
+
+| Date | Section(s) touched | Change | ID(s) affected |
+|---|---|---|---|
+| 2026-07-05 | 1.9, Open Items | Fixed two schema mismatches against TS interfaces: added `anchor` and `created_at` to `note_links` (SEK-03); added `page_count` and `ocr_status` to `documents` (SEK-02); added open question regarding document title derivation. | SEK-02, SEK-03 |
