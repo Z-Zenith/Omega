@@ -14,7 +14,7 @@
 | Shared backend | Backend API | API | Container |
 | Primary data store | Database | DB | Container |
 | AI-driven subsystem (plagiarism, autograding, browsing summary) | AI Services | AIS | Container |
-| Third-party code runner | Code Execution Service | CEX | External System |
+| Self-hosted code runner (Judge0 or Piston) | Code Execution Service | CEX | Container (self-hosted) |
 | Third-party payments | Payment Gateway | PAY | External System |
 | Shared code/document/notes editor, used by both SDA and TWA | Shared Editor Kit | SEK | Component (shared, cross-container) |
 | Shared 1:1 messaging, used by both SDA and TWA | Direct Messaging | DMS | Component (shared, cross-container) |
@@ -191,18 +191,16 @@ flowchart LR
     admin["Actor: Admin"]
     parent["Actor: Parent"]
     system(["System: Campus Digitalization Platform"])
-    cex[("External System: Code Execution Service")]
     pay[("External System: Payment Gateway")]
 
     student --> system
     teacher --> system
     admin --> system
     parent --> system
-    system --> cex
     system -. async .-> pay
 ```
 
-Students, teachers, and admins interact through their own app; parents interact through a dedicated Parent Portal (Section 7) for viewing their ward's data and paying fees. The system calls out to the Code Execution Service synchronously (student is waiting for output) and to the Payment Gateway asynchronously (payment confirmation arrives via callback).
+Students, teachers, and admins interact through their own app; parents interact through a dedicated Parent Portal (Section 7) for viewing their ward's data and paying fees. The Code Execution Service (Judge0/Piston) is self-hosted alongside the rest of the platform, so it's an internal container (Section 7), not an external dependency — the only genuinely external system left is the Payment Gateway, called asynchronously (payment confirmation arrives via callback).
 
 ---
 
@@ -218,10 +216,10 @@ flowchart TB
         prt["Parent Portal<br/>(web)"]
         api["Backend API"]
         ais["AI Services"]
-        authz["Authorization Service<br/>(OpenFGA, self-hosted)"]
+        infra["Self-Hosted Infra Services<br/>(Authorization + Code Execution)"]
         db[("Database")]
     end
-    extsvc[("Code Execution Service /<br/>Payment Gateway")]
+    pay[("External System: Payment Gateway")]
 
     sda --> api
     twa --> api
@@ -229,12 +227,12 @@ flowchart TB
     prt --> api
     api --> db
     api --> ais
-    api --> authz
-    sda -. code run .-> extsvc
-    api -. payment .-> extsvc
+    api --> infra
+    sda -. code run .-> infra
+    api -. payment .-> pay
 ```
 
-`extsvc` groups two unrelated third-party systems into one node purely to stay under this diagram's node cap — Section 0's registry keeps `CEX` and `PAY` as separate entries.
+`infra` groups the Authorization Service (OpenFGA) and Code Execution Service (Judge0/Piston) into one node purely to stay under this diagram's node cap — both are self-hosted, both are separate containers with separate Dockerfiles (Section 11), and Section 0's registry keeps `AUTHZ` and `CEX` as distinct entries. `pay` is the only genuinely external system left at this zoom level — everything else, self-hosted or not, is deployed and operated as part of this platform.
 
 | Container | Responsibility | Tech Stack |
 |---|---|---|
@@ -245,6 +243,7 @@ flowchart TB
 | Backend API | Session-uniqueness enforcement, notification routing, group provisioning, material download, data model | ASP.NET Core, .NET 10 (LTS, supported through Nov 2028) |
 | Database | System of record for accounts, groups, assignments, marks, attendance, timetable | PostgreSQL |
 | Authorization Service | Evaluates every permission check as a relationship-graph query; models College/Department/Role/User as a graph so multi-college tenancy is a graph boundary, not a hand-rolled `college_id` column everywhere | OpenFGA, self-hosted — decided over managed alternatives since Permit.io's free tier (1,000 users) falls well short of the 20,000+ user floor required |
+| Code Execution Service | Runs student-submitted code (SEK-01) and returns output/errors | Judge0 or Piston, self-hosted — no managed alternative beat self-hosting here; Piston's public API is rate-limited and Judge0 explicitly supports self-hosted deployment as a first-class option |
 | AI Services | Plagiarism/copy-check, AI-content detection, autograding, browsing-history summary, future syllabus extraction | Split by stakes: **Copyleaks** (AIS-02, internet plagiarism — needs a real web index, not self-hostable, strong multilingual support) and **Pangram** (AIS-05, AI-content detection — benchmarked with the lowest false-positive rate of any evaluated detector, which matters given the bias risk noted in Section 5) are external services because getting these two *wrong* directly harms a student; AIS-03 (cross-class copy-check) uses a self-hosted open embedding-similarity model since it only compares your own students' submissions to each other, no internet index needed; AIS-01 (browsing summary) and AIS-04 (autograding suggestion, teacher-confirmed before publishing) use a self-hosted open-weight LLM since both are lower-stakes/advisory; AIS-07 (suspicious-behaviour detection) uses a lightweight self-hosted anomaly classifier on keystroke/mouse-timing telemetry, not an LLM at all |
 
 *(AIS-06 has no stack decision — it's Won't-priority/future, not built this round.)*
@@ -397,6 +396,27 @@ RBAC model finalized as a **Zanzibar-model relationship graph** (ReBAC) rather t
 
 ---
 
+## 11. Deployment View [Extended]
+
+Decided: Docker for every server-side container. Docker Compose for orchestration, not Kubernetes — two novices running a single college's worth of traffic don't need Kubernetes's operational overhead; revisit this once multi-college scale actually requires it, not before.
+
+| Container | Dockerized? | Notes |
+|---|---|---|
+| Backend API | Yes | Own Dockerfile |
+| AI Services | Yes | Self-hosted models (AIS-01/03/04/07) run here; Copyleaks/Pangram (AIS-02/05) are called out to as external APIs, not containers themselves |
+| Authorization Service (OpenFGA) | Yes | Official OpenFGA Docker image |
+| Code Execution Service (Judge0/Piston) | Yes | Official Docker image; this is the one container that runs *untrusted* code (student submissions) — needs its own sandboxing/resource-limit configuration, don't just run it with default settings |
+| Database (PostgreSQL) | Yes | Official Postgres Docker image; volume-mounted for persistence, not ephemeral |
+| Teacher Web App, Admin Web App, Parent Portal | Yes, in prod | Built as static bundles, served via an nginx container; in Dev, run via Vite's own dev server instead (outside Docker) for fast hot-reload against the Dockerized backend |
+| Student Desktop App | **No** | Native Avalonia app, distributed as a platform installer — not a server-side service, nothing to containerize |
+
+| Environment | Infra | Notes |
+|---|---|---|
+| Dev | Docker Compose, one `docker-compose.yml` per developer's machine | Web apps run outside Docker (Vite dev server) for hot-reload; everything else runs in containers so both people have an identical backend environment without "works on my machine" drift |
+| Prod | Docker Compose on self-hosted infrastructure | Single-server for now; if multi-college scale eventually demands it, re-evaluate Kubernetes then — don't build for that scale prematurely |
+
+---
+
 ## 16. Open Questions [Core]
 
 | Question | Owner | Status |
@@ -427,3 +447,4 @@ RBAC model finalized as a **Zanzibar-model relationship graph** (ReBAC) rather t
 | 2026-07-04 | 0, 3, 5, 7, 9, 16 | Resolved batch of open questions: API-01 kicks the old session; SDA-13 grace period is 20 minutes; SDA-04 whitelist approval is institution-wide; TWA-09 threshold is 65%; AIS-03 threshold is 90%; SEK-01 language list finalized; SDA tech stack decided as Avalonia (.NET) over MAUI (no official Linux support); AWA-13 delegable to Admin and IT; SDA-20/TWA-15/AWA-11 scoped by year/department; PRT-01 is Roll No + DOB only; Authorization Service decided as self-hosted OpenFGA (Permit.io's free tier fell short of the 20k-user floor); Authentication Service (AuthKit) evaluation concluded — rejected, AUTHN removed, custom Roll No/Password/TOTP flow finalized; multi-college onboarding stays a manual step with internal automation preferred | API-01, SDA-13, SDA-04, TWA-09, AIS-03, SEK-01, AWA-13, SDA-20, TWA-15, AWA-11, PRT-01, AUTHZ, SDA-02 |
 | 2026-07-04 | 0, 7, 16, 17 | Resolved remaining tech stack open question: Backend API on ASP.NET Core/.NET 10 (LTS), Postgres as Database; Teacher Web App/Admin Web App/Parent Portal on React+TypeScript (Tailwind, shadcn/ui, Framer Motion, TanStack Query, Recharts) with an OpenAPI-generated typed client bridging the C#/TS boundary; SDA's Avalonia target confirmed as Windows/Linux/macOS (iOS ruled out as a *desktop* target — it's a mobile OS requiring Apple's Automatic Assessment Configuration/MDM for any lockdown, which doesn't apply here) | API, DB, TWA, AWA, PRT, SDA |
 | 2026-07-04 | 5, 7, 9, 16 | Gap-fixing pass: built the full permission catalog (was only representative before); fixed IT role missing `manage_roles_and_permissions` despite AWA-13 explicitly naming IT as a holder; decided AI Services stack split by stakes (Copyleaks + Pangram external for plagiarism/AI-detection, self-hosted for lower-stakes autograding/summary/anomaly-detection); added a fairness constraint for AIS-05's documented false-positive bias against non-native English writers, with a hardened acceptance criterion requiring the score never stand alone as evidence; fixed four stale Section 8 diagrams that had drifted from Section 3 as features were added later (SDA-08/SDA-25 missing from 8a; TWA-19/TWA-20/AIS-07 missing from 8b; AWA-13/AWA-14 missing entirely from 8c) | AIS-05, all Section 8 diagrams |
+| 2026-07-04 | 0, 6, 7, 11 | Decided Docker + Docker Compose (not Kubernetes) for all server-side containers; caught and fixed an inconsistency this surfaced — Code Execution Service was still classified as External System despite being self-hosted (same situation OpenFGA was already corrected for), reclassified to a self-hosted Container and removed from the Context diagram accordingly; added Section 11 Deployment View | CEX, all C4 diagrams |
