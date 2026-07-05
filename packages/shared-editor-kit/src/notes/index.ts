@@ -1,6 +1,5 @@
 /**
  * SEK-03 — Markdown notes public surface.
- * Component implementation lands in a later PR.
  */
 export type {
   Note,
@@ -11,3 +10,6 @@ export type {
   NotesEditorProps,
   NotesEditorApi,
 } from './types.js';
+
+export { NotesEditor } from './NotesEditor.js';
+export { extractOutgoingLinks } from './linkExtraction.js';

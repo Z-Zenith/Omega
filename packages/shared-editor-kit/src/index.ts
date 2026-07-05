@@ -1,11 +1,11 @@
 /**
  * Shared Editor Kit (SEK) — public TypeScript interface.
  *
- * This package is intentionally a type-only module. The component
- * implementations land in later PRs. The goal of this package is to define
+ * Started as a type-only module; component implementations land per-feature
+ * as they're built (SEK-03 first). The goal of this package is to define
  * the contract that the Student Desktop App (SDA, SDA-19) and the Teacher
  * Web App (TWA, TWA-14) consume — and to let the Backend API team model the
- * data path against a stable shape — before any UI code is written.
+ * data path against a stable shape — before all UI code is written.
  *
  * Feature IDs reference: docs/Campus platform architecture.md, Section 3
  * (SEK-01..05). Every interface here was derived from the EARS requirement
@@ -13,10 +13,10 @@
  * call out the criterion that drove the shape.
  *
  * Status of the five features:
- *   - SEK-01 (Code editor)            — Must — interface defined in this PR.
- *   - SEK-02 (Document viewer)        — Must — interface defined in this PR.
- *   - SEK-03 (Markdown notes)         — Must — interface defined in this PR.
- *   - SEK-04 (Built-in image search)  — Could — interface defined in this PR.
+ *   - SEK-01 (Code editor)            — Must — interface only.
+ *   - SEK-02 (Document viewer)        — Must — interface only.
+ *   - SEK-03 (Markdown notes)         — Must — implemented (NotesEditor).
+ *   - SEK-04 (Built-in image search)  — Could — interface only.
  *   - SEK-05 (Inking w/ diagrams)     — Won't — deliberately NOT defined here.
  *                                       Will reuse the InkStroke primitive
  *                                       (types/common.ts) when promoted.
@@ -80,6 +80,7 @@ export type {
   NotesEditorProps,
   NotesEditorApi,
 } from './notes/index.js';
+export { NotesEditor, extractOutgoingLinks } from './notes/index.js';
 
 // SEK-04 — Built-in image search (inside the notes editor)
 export type {
