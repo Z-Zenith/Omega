@@ -1,72 +1,64 @@
-import { motion } from 'framer-motion'
-import { useQuery } from '@tanstack/react-query'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Navigate, Route, Routes, Link } from 'react-router-dom'
+import { AuthProvider, useAuth } from '@/lib/auth'
+import { LoginPage } from '@/pages/LoginPage'
+import { TimetablePage } from '@/pages/TimetablePage'
+import { EventsPage } from '@/pages/EventsPage'
 
-const sampleAttendanceData = [
-  { section: 'A', percent: 92 },
-  { section: 'B', percent: 78 },
-  { section: 'C', percent: 88 },
-]
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { token } = useAuth()
+  if (!token) return <Navigate to="/login" replace />
+  return children
+}
 
-function useHealthCheck() {
-  return useQuery({
-    queryKey: ['health'],
-    queryFn: async () => {
-      const res = await fetch('/api/v1/auth/session').catch(() => null)
-      return { reachable: res !== null }
-    },
-  })
+function Shell({ children }: { children: React.ReactNode }) {
+  const { fullName, setSession } = useAuth()
+  return (
+    <div className="min-h-svh">
+      <nav className="flex items-center justify-between border-b px-8 py-4">
+        <div className="flex gap-6 text-sm font-medium">
+          <Link to="/timetable">Timetable</Link>
+          <Link to="/events">Events</Link>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <span>{fullName}</span>
+          <button onClick={() => setSession(null)} className="underline">
+            Sign out
+          </button>
+        </div>
+      </nav>
+      {children}
+    </div>
+  )
 }
 
 function App() {
-  const health = useHealthCheck()
-
   return (
-    <motion.main
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mx-auto flex min-h-svh max-w-3xl flex-col gap-6 p-8"
-    >
-      <Card>
-        <CardHeader>
-          <CardTitle>Teacher Web App</CardTitle>
-          <CardDescription>
-            Track 1 scaffold — Tailwind, shadcn/ui, Framer Motion, TanStack
-            Query, and Recharts wired together.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={sampleAttendanceData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="section" />
-                <YAxis />
-                <Bar dataKey="percent" fill="var(--color-primary)" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <Button>
-            Backend reachable: {health.data?.reachable ? 'yes' : 'checking…'}
-          </Button>
-        </CardContent>
-      </Card>
-    </motion.main>
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/timetable"
+          element={
+            <RequireAuth>
+              <Shell>
+                <TimetablePage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/events"
+          element={
+            <RequireAuth>
+              <Shell>
+                <EventsPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/timetable" replace />} />
+      </Routes>
+    </AuthProvider>
   )
 }
 
