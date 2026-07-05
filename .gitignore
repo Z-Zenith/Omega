@@ -1,6 +1,4 @@
 .gitingnore
-CLAUDE.md
-AGENTS.md
 
 # Node / TypeScript packages (shared-editor-kit, direct-messaging, web apps)
 node_modules/
@@ -9,7 +7,6 @@ dist/
 out/
 *.tsbuildinfo
 .pnpm-store/
-.vite/
 
 # .NET / Avalonia (student-desktop, backend-api, ai-services)
 bin/
