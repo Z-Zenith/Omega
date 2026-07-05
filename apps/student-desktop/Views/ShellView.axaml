@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.ShellView"
+             x:DataType="vm:ShellViewModel">
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1" Padding="16,10">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                <Button Grid.Column="0" Content="Calendar" Command="{Binding ShowCalendarCommand}" Margin="0,0,8,0"/>
+                <Button Grid.Column="1" Content="Events" Command="{Binding ShowEventsCommand}"/>
+                <TextBlock Grid.Column="3" Text="{Binding FullName}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <Button Grid.Column="4" Content="Sign out" Command="{Binding SignOutCommand}"/>
+            </Grid>
+        </Border>
+        <ContentControl Content="{Binding CurrentPage}"/>
+    </DockPanel>
+
+</UserControl>

@@ -1,0 +1,93 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:conv="using:StudentDesktop.Converters"
+             xmlns:avconv="using:Avalonia.Data.Converters"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.CalendarView"
+             x:DataType="vm:CalendarViewModel">
+
+    <ScrollViewer>
+        <StackPanel Margin="20" Spacing="16">
+            <TextBlock Text="My Calendar" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="College-wide events, registered events, to-dos, and custom entries in one view (SDA-14) — class schedule overlaid Google-Calendar-style."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed" IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+
+            <Border BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="6" ClipToBounds="True">
+                <ItemsControl ItemsSource="{Binding GridCells}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Grid ColumnDefinitions="60,*,*,*,*,*,*,*"
+                                  RowDefinitions="30,46,46,46,46,46,46,46,46,46,46,46,46,46,46"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.Styles>
+                        <Style Selector="ContentPresenter" x:DataType="vm:CalendarCellViewModel">
+                            <Setter Property="Grid.Row" Value="{Binding Row}"/>
+                            <Setter Property="Grid.Column" Value="{Binding Column}"/>
+                        </Style>
+                    </ItemsControl.Styles>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:CalendarCellViewModel">
+                            <Border Background="{Binding Kind, Converter={x:Static conv:KindToBrushConverter.Instance}}"
+                                    BorderBrush="#EEEEEE" BorderThickness="0,0,1,1" Padding="3">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Text}" FontWeight="Bold" FontSize="11" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding SubText}" FontSize="10" Foreground="Gray" TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Border>
+
+            <TextBlock Text="To-dos" FontWeight="Bold" FontSize="14"/>
+            <ItemsControl ItemsSource="{Binding Todos}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:CalendarListItemViewModel">
+                        <Border Background="#F5F0FF" CornerRadius="4" Padding="8" Margin="0,0,0,4">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Title}" FontWeight="Medium"/>
+                                <TextBlock Text="{Binding When, StringFormat='due {0:MMM d}'}" Foreground="Gray"/>
+                                <TextBlock Text="{Binding Detail}" Foreground="Gray"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="Custom entries" FontWeight="Bold" FontSize="14"/>
+            <ItemsControl ItemsSource="{Binding CustomEntries}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:CalendarListItemViewModel">
+                        <Border Background="#FFF6E0" CornerRadius="4" Padding="8" Margin="0,0,0,4">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Title}" FontWeight="Medium"/>
+                                <TextBlock Text="{Binding When, StringFormat='{}{0:MMM d}'}" Foreground="Gray"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="Other upcoming events" FontWeight="Bold" FontSize="14"/>
+            <ItemsControl ItemsSource="{Binding OtherEvents}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:CalendarListItemViewModel">
+                        <Border Background="#E0F5E9" CornerRadius="4" Padding="8" Margin="0,0,0,4">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Title}" FontWeight="Medium"/>
+                                <TextBlock Text="{Binding When, StringFormat='{}{0:MMM d, h:mm tt}'}" Foreground="Gray"/>
+                                <TextBlock Text="{Binding Detail}" Foreground="Gray"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>
