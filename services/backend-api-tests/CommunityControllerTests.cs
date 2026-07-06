@@ -44,6 +44,12 @@ public class CommunityControllerTests
         CreatedAt = DateTime.UtcNow,
     };
 
+    private static Section NewSection(Guid collegeId, string name = "3rd Year CSE - A")
+    {
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = collegeId, Name = "CSE" };
+        return new Section { Id = Guid.NewGuid(), DepartmentId = department.Id, Department = department, Year = 3, Name = name };
+    }
+
     private static CommunityController ControllerAs(AppDbContext db, User user)
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -223,5 +229,149 @@ public class CommunityControllerTests
         Assert.Equal("First post!", dto.Content);
         Assert.Equal(student.Id, dto.AuthorId);
         Assert.Single(await db.GroupPosts.Where(p => p.GroupId == group.Id).ToListAsync());
+    }
+
+    // API-02
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_ForbidsNonAdmin()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.ProvisionClassGroups();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    // API-02: acceptance-critical — "every class has exactly one auto-created group ...
+    // and enroll its students".
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_CreatesOneClassGroupPerSection_AndEnrollsItsStudents()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var section = NewSection(admin.CollegeId);
+        var student1 = NewUser(AccountType.Student, admin.CollegeId);
+        var student2 = NewUser(AccountType.Student, admin.CollegeId);
+        db.Users.AddRange(admin, student1, student2);
+        db.Departments.Add(section.Department);
+        db.Sections.Add(section);
+        db.SectionEnrollments.AddRange(
+            new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student1.Id },
+            new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student2.Id });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.ProvisionClassGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ProvisionClassGroupsResponse>(ok.Value);
+        Assert.Equal(1, response.GroupsCreated);
+        Assert.Equal(0, response.GroupsAlreadyExisted);
+        Assert.Equal(2, response.StudentsEnrolled);
+
+        var group = await db.Groups.SingleAsync(g => g.SectionId == section.Id);
+        Assert.Equal(GroupType.Class, group.Type);
+        Assert.Null(group.CreatedBy);
+        Assert.Equal(section.Name, group.Name);
+        var memberIds = await db.GroupMembers.Where(m => m.GroupId == group.Id).Select(m => m.UserId).ToListAsync();
+        Assert.Equal(new[] { student1.Id, student2.Id }.OrderBy(id => id), memberIds.OrderBy(id => id));
+    }
+
+    // API-02: running provisioning twice (e.g. a retry) must not create a second class
+    // group for the same section or duplicate memberships — only top up newly-enrolled
+    // students.
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_IsIdempotent_TopsUpNewlyEnrolledStudents_WithoutDuplicating()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var section = NewSection(admin.CollegeId);
+        var student1 = NewUser(AccountType.Student, admin.CollegeId);
+        var student2 = NewUser(AccountType.Student, admin.CollegeId);
+        db.Users.AddRange(admin, student1, student2);
+        db.Departments.Add(section.Department);
+        db.Sections.Add(section);
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student1.Id });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var firstResult = await controller.ProvisionClassGroups();
+        var firstOk = Assert.IsType<OkObjectResult>(firstResult.Result);
+        var firstRun = Assert.IsType<ProvisionClassGroupsResponse>(firstOk.Value);
+        Assert.Equal(1, firstRun.GroupsCreated);
+        Assert.Equal(1, firstRun.StudentsEnrolled);
+
+        // A second student enrolls after the first provisioning run.
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student2.Id });
+        await db.SaveChangesAsync();
+
+        var secondResult = await controller.ProvisionClassGroups();
+        var secondOk = Assert.IsType<OkObjectResult>(secondResult.Result);
+        var secondRun = Assert.IsType<ProvisionClassGroupsResponse>(secondOk.Value);
+        Assert.Equal(0, secondRun.GroupsCreated);
+        Assert.Equal(1, secondRun.GroupsAlreadyExisted);
+        Assert.Equal(1, secondRun.StudentsEnrolled); // only the newly-enrolled student, not student1 again
+
+        Assert.Single(await db.Groups.Where(g => g.SectionId == section.Id).ToListAsync());
+        var group = await db.Groups.SingleAsync(g => g.SectionId == section.Id);
+        Assert.Equal(2, await db.GroupMembers.Where(m => m.GroupId == group.Id).CountAsync());
+    }
+
+    // API-02: multi-tenant boundary — an Admin must not provision (or even see) another
+    // college's sections.
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_DoesNotTouchSectionsInAnotherCollege()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var otherCollegeSection = NewSection(Guid.NewGuid(), "Other College Section");
+        db.Users.Add(admin);
+        db.Departments.Add(otherCollegeSection.Department);
+        db.Sections.Add(otherCollegeSection);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.ProvisionClassGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ProvisionClassGroupsResponse>(ok.Value);
+        Assert.Equal(0, response.GroupsCreated);
+        Assert.False(await db.Groups.AnyAsync(g => g.SectionId == otherCollegeSection.Id));
+    }
+
+    // API-02: no DB-level unique constraint stops two Class groups from ever existing for the
+    // same section (e.g. a race between two concurrent provisioning calls) — this proves the
+    // endpoint degrades to picking one deterministically instead of throwing on the resulting
+    // duplicate key, so one bad section can't take down provisioning for the whole college.
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_ToleratesPreExistingDuplicateClassGroups_ForSameSection()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var section = NewSection(admin.CollegeId);
+        var student = NewUser(AccountType.Student, admin.CollegeId);
+        var olderDuplicate = new Group { Id = Guid.NewGuid(), CollegeId = admin.CollegeId, Name = section.Name, Type = GroupType.Class, SectionId = section.Id };
+        var newerDuplicate = new Group { Id = Guid.NewGuid(), CollegeId = admin.CollegeId, Name = section.Name, Type = GroupType.Class, SectionId = section.Id };
+        db.Users.AddRange(admin, student);
+        db.Departments.Add(section.Department);
+        db.Sections.Add(section);
+        db.Groups.AddRange(olderDuplicate, newerDuplicate);
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student.Id });
+        await db.SaveChangesAsync();
+
+        var result = await ControllerAs(db, admin).ProvisionClassGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ProvisionClassGroupsResponse>(ok.Value);
+        Assert.Equal(0, response.GroupsCreated);
+        Assert.Equal(1, response.GroupsAlreadyExisted);
+        // Both duplicates still exist (cleaning them up is a data-repair job, not this
+        // endpoint's concern) — but only one was topped up with the student.
+        Assert.Equal(2, await db.Groups.CountAsync(g => g.SectionId == section.Id));
+        Assert.Equal(1, await db.GroupMembers.CountAsync(m => m.UserId == student.Id));
     }
 }

@@ -378,6 +378,7 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | POST | `/groups/{id}/posts` | SDA-16 |
 | POST | `/materials` | TWA-06 |
 | GET | `/materials/{id}/download` | API-03 |
+| POST | `/groups/provision` | API-02 — Admin-triggered; see Open Items re: automatic scheduling |
 
 ### Calendar & Events
 | Method | Path | Feature |
@@ -422,6 +423,8 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 
 - Data-subject-rights workflow (access/correct/erase) has no table yet — add one once that feature is scoped.
 - **Documents Title field**: `DocumentDescriptor.title` in the Shared Editor Kit is now optional (not backed by a `documents` column) until this is resolved. Still open: should title be (a) added as a stored column, or (b) derived from `file_url`/filename by the embedder? Whichever wins, `title` in the SEK interface should be revisited (made required again, or removed in favor of an embedder-side helper).
+- **API-02 has no automatic trigger.** The requirement is "when a new semester starts... automatically," but no scheduler/cron/hosted-service infrastructure exists anywhere in the backend yet, so `POST /groups/provision` ships as a callable, idempotent building block that an Admin triggers by hand. Wiring an actual automatic trigger (a scheduled job, or a "start semester" admin action that calls this internally) is an open follow-up — flagging so this doesn't get silently counted as fully done.
+- **No DB constraint enforces "at most one Class-type group per section."** `groups.section_id` has no unique index (partial or otherwise), so two concurrent calls to `POST /groups/provision` could each create a group for the same section before either commits. The endpoint tolerates this if it happens (picks one group deterministically to top up rather than crashing) but doesn't prevent it. A partial unique index (`WHERE type = 'class'`) would close this — proposing it here per the contract-change rule (Part 1 is a shared contract); needs a thumbs-up before it's added, since it's a schema change.
 
 ~~Full permission-code catalog~~ — resolved; `permissions` and `role_default_permissions` tables added, seeded from architecture doc Section 9.
 ~~AI Services provider~~ — resolved; Copyleaks (AIS-02) and Pangram (AIS-05) as external services for the two stakes-sensitive detectors, self-hosted models for AIS-01/03/04/07.

@@ -117,6 +117,116 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         return Ok(new GroupPostDto(post.Id, post.GroupId, post.AuthorId, post.Content, post.CreatedAt));
     }
 
+    // API-02. Not gated by "create_group" — that permission is for Lecturer/HoD/Admin to
+    // hand-create individual groups, whereas this provisions every section's auto-managed
+    // class group in one call, so it's restricted to Admin only. Scoped to the caller's own
+    // college (multi-tenant boundary — mirrors CollegeId scoping elsewhere, e.g.
+    // BrowsingController). Idempotent: safe to call more than once for the same semester
+    // (e.g. a retry, or a newly-enrolled student joining after the first run) — an existing
+    // class group is topped up with any newly-enrolled students instead of duplicated.
+    // Membership is additive only: a student later dropped from section_enrollments is not
+    // removed from the group by this endpoint. That's a deliberate scope decision, not an
+    // oversight — "enroll its students" (the acceptance criterion) doesn't require reconciling
+    // drops, and removal is a materially different (and riskier) operation to bundle in here.
+    //
+    // Known scope gap: the architecture doc's requirement is that this happen automatically
+    // when a new semester starts, with "no manual step required." No scheduler/cron
+    // infrastructure exists anywhere in this codebase yet, so this ships as a callable,
+    // idempotent building block that an Admin triggers by hand — the automatic-trigger half
+    // of API-02 is an open follow-up, not something this endpoint claims to satisfy on its own.
+    //
+    // Known race: nothing at the DB level enforces "at most one Class group per section" (see
+    // docs/campus-platform-db-api-schema.md Open Items) — two concurrent calls to this
+    // endpoint could each see no existing group for a section and both create one. A partial
+    // unique index would close that, but adding one is a DB schema change that needs the
+    // contract-change sign-off (CLAUDE.md), not something to slip in unilaterally here. Until
+    // that lands, the grouping below picks one group deterministically instead of crashing if
+    // it ever finds a duplicate.
+    [HttpPost("groups/provision")]
+    public async Task<ActionResult<ProvisionClassGroupsResponse>> ProvisionClassGroups()
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (caller.AccountType is not AccountType.AdminTier)
+        {
+            return Forbid();
+        }
+
+        var sections = await db.Sections
+            .Where(s => s.Department.CollegeId == caller.CollegeId)
+            .Select(s => new { s.Id, s.Name })
+            .ToListAsync();
+        var sectionIds = sections.Select(s => s.Id).ToList();
+
+        // Scoped by section membership rather than a separate `g.CollegeId == caller.CollegeId`
+        // filter — that would be a second, independently-maintained source of truth for "which
+        // college" alongside the sections query above, and the two could drift apart (e.g. a
+        // department reassigned to a different college after its class group already exists).
+        var existingClassGroups = (await db.Groups
+                .Where(g => g.Type == GroupType.Class && g.SectionId != null && sectionIds.Contains(g.SectionId.Value))
+                .ToListAsync())
+            .GroupBy(g => g.SectionId!.Value)
+            .ToDictionary(grp => grp.Key, grp => grp.OrderBy(g => g.Id).First());
+
+        var enrollmentsBySection = (await db.SectionEnrollments
+                .Where(e => sectionIds.Contains(e.SectionId))
+                .ToListAsync())
+            .ToLookup(e => e.SectionId, e => e.StudentId);
+
+        var existingGroupIds = existingClassGroups.Values.Select(g => g.Id).ToList();
+        var existingMembersByGroup = (await db.GroupMembers
+                .Where(m => existingGroupIds.Contains(m.GroupId))
+                .ToListAsync())
+            .ToLookup(m => m.GroupId, m => m.UserId);
+
+        var groupsCreated = 0;
+        var studentsEnrolled = 0;
+        var now = DateTime.UtcNow;
+
+        foreach (var section in sections)
+        {
+            if (!existingClassGroups.TryGetValue(section.Id, out var group))
+            {
+                group = new Group
+                {
+                    Id = Guid.NewGuid(),
+                    CollegeId = caller.CollegeId,
+                    Name = section.Name.Trim(),
+                    Type = GroupType.Class,
+                    SectionId = section.Id,
+                    CreatedBy = null, // null marks it as auto-created, per the groups table's own convention
+                };
+                db.Groups.Add(group);
+                groupsCreated++;
+            }
+
+            var memberIds = existingMembersByGroup[group.Id].ToHashSet();
+            foreach (var studentId in enrollmentsBySection[section.Id])
+            {
+                if (!memberIds.Add(studentId))
+                {
+                    continue;
+                }
+                db.GroupMembers.Add(new GroupMember
+                {
+                    Id = Guid.NewGuid(),
+                    GroupId = group.Id,
+                    UserId = studentId,
+                    JoinedAt = now,
+                });
+                studentsEnrolled++;
+            }
+        }
+
+        await db.SaveChangesAsync();
+
+        var groupsAlreadyExisted = sections.Count - groupsCreated;
+        return Ok(new ProvisionClassGroupsResponse(groupsCreated, groupsAlreadyExisted, studentsEnrolled));
+    }
+
     // TWA-06. Gated by AccountType rather than a permission code — no "upload_material"
     // code exists in the seeded catalog, and adding one is an OpenFGA/permission-catalog
     // contract change that needs separate sign-off (CLAUDE.md contract-change rule).

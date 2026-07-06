@@ -15,3 +15,5 @@ public record GroupPostDto(Guid Id, Guid GroupId, Guid AuthorId, string Content,
 public record CreateMaterialRequest(string Title, string FileUrl, Guid? SubjectId, Guid? GroupId);
 
 public record MaterialDto(Guid Id, string Title, string FileUrl, Guid? SubjectId, Guid? GroupId, Guid UploadedBy, DateTime UploadedAt);
+
+public record ProvisionClassGroupsResponse(int GroupsCreated, int GroupsAlreadyExisted, int StudentsEnrolled);
