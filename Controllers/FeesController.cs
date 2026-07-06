@@ -22,13 +22,10 @@ public class FeesController(AppDbContext db) : ControllerBase
     [Authorize]
     public async Task<ActionResult<PayFeeResponse>> Pay(Guid id)
     {
+        // Existence and ownership collapse into a single Forbid so an unauthorized caller can't
+        // distinguish "this fee doesn't exist" from "this fee isn't yours" by probing IDs.
         var fee = await db.FeeRecords.FindAsync(id);
-        if (fee is null)
-        {
-            return NotFound();
-        }
-
-        if (await ParentWardAccess.GetAuthorizedParentIdAsync(db, User, fee.StudentId) is null)
+        if (fee is null || await ParentWardAccess.GetAuthorizedParentIdAsync(db, User, fee.StudentId) is null)
         {
             return Forbid();
         }
@@ -66,13 +63,9 @@ public class FeesController(AppDbContext db) : ControllerBase
     // PRT-02
     [HttpGet("ward/{studentId}")]
     [Authorize]
+    [ServiceFilter(typeof(WardAccessFilter))]
     public async Task<ActionResult<IReadOnlyList<WardFeeDto>>> Ward(Guid studentId)
     {
-        if (await ParentWardAccess.GetAuthorizedParentIdAsync(db, User, studentId) is null)
-        {
-            return Forbid();
-        }
-
         var fees = await db.FeeRecords
             .Where(f => f.StudentId == studentId)
             .OrderByDescending(f => f.DueDate)

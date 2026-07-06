@@ -37,6 +37,22 @@ public static class ParentWardAccess
             return null;
         }
 
+        // Re-check the live parent_wards link rather than trusting the JWT's ward_id claim
+        // alone, so revoking a parent's access to a ward takes effect immediately instead of
+        // only after the token expires.
+        var stillLinked = await db.ParentWards
+            .AnyAsync(w => w.ParentUserId == userId && w.StudentId == requestedStudentId);
+        if (!stillLinked)
+        {
+            return null;
+        }
+
+        var parent = await db.Users.FindAsync(userId);
+        if (parent is null || !parent.IsActive)
+        {
+            return null;
+        }
+
         return userId;
     }
 }
