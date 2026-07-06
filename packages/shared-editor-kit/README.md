@@ -2,7 +2,7 @@
 
 Public TypeScript interface for the **Shared Editor Kit (SEK)** — the cross-container component consumed by the **Student Desktop App** (SDA, `SDA-19`) and the **Teacher Web App** (TWA, `TWA-14`).
 
-> **Status: type-only / interface-only.** This package ships the contract, not the components. Component implementations land in later PRs once both consumers agree on the shape. Defining the interface up front is a `docs/campus-platform-work-division.md` Section 2 Week 0 item — it unblocks both tracks before any editor UI is built.
+> **Status: interfaces defined, components land per-feature.** This package ships the contract for every SEK feature; runtime components are implemented one feature at a time as each is picked up. Defining the interface up front is a `docs/campus-platform-work-division.md` Section 2 Week 0 item — it unblocks both tracks before all editor UI is built.
 
 ## Features covered
 
@@ -10,7 +10,7 @@ Public TypeScript interface for the **Shared Editor Kit (SEK)** — the cross-co
 |---|---|---|
 | [SEK-01](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Code editor (C, C++, Python, Java, .NET, HTML, CSS, JS/TS, Node, SQL, JSON, YAML) | Interface only |
 | [SEK-02](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Document viewer & annotator (PDF/PPTX/DOCX, highlights/textboxes/ink, OCR) | Interface only |
-| [SEK-03](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Markdown notes (Obsidian-style linked notes) | Interface only |
+| [SEK-03](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Markdown notes (Obsidian-style linked notes) | **Implemented** — `NotesEditor` + `extractOutgoingLinks` |
 | [SEK-04](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Built-in image search (inside the notes editor) | Interface only |
 | [SEK-05](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Inking w/ block diagrams | **Not defined** — Won't priority; will reuse the shared `InkStroke` primitive when promoted |
 
@@ -65,6 +65,10 @@ This package is on the shared-contract list (`docs/campus-platform-work-division
 ```bash
 pnpm typecheck     # tsc --noEmit — verifies the contract compiles in isolation
 pnpm build         # tsc — emits .d.ts + .js to ./dist (kept out of git)
+pnpm test          # typecheck, then runs runtime tests (tests/*.test.ts) via `node --test`
 ```
 
-> **No runtime tests in this PR.** The package is type-only, so there is nothing to exercise at runtime. Tests for the component implementations will live alongside those implementations in later PRs.
+Runtime tests use Node's built-in test runner directly against `.ts` sources (Node 22+ type
+stripping) rather than adding a separate test-framework dependency — see
+`tests/notes.linkExtraction.test.ts` for the pattern. Component-level (React rendering) tests
+for SEK-01/02/04 land alongside those implementations when they're built.
