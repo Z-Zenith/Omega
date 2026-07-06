@@ -36,8 +36,17 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 | totp_secret | text, encrypted | SDA-02, SDA-23 |
 | full_name | text | |
 | department_id | uuid FK → departments, nullable | |
+| date_of_birth | date, nullable | students only — PRT-01 parent-login credential |
 | is_active | boolean | |
 | created_at | timestamptz | AWA-09 |
+
+**`parent_wards`**
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid PK | |
+| parent_user_id | uuid FK → users | account_type = parent |
+| student_id | uuid FK → users | account_type = student; unique per (parent_user_id, student_id) |
+| created_at | timestamptz | PRT-01 — authorization gate: a parent may only log in as / view a student registered here, even if they know the roll number + DOB |
 
 **`permissions`** — the catalog itself, now that the architecture doc's Section 9 enumerates it in full
 | Column | Type | Notes |
