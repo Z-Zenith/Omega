@@ -29,7 +29,20 @@ public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService)
 
         var student = matchingStudents.Count == 1 ? matchingStudents[0] : null;
 
-        if (student is null || student.DateOfBirth != request.DateOfBirth)
+        if (student is null)
+        {
+            return Unauthorized(new { error = "invalid_credentials", message = "No student matches that roll number and date of birth." });
+        }
+
+        if (student.DateOfBirth is null)
+        {
+            // date_of_birth is nullable and not backfilled for students created before this
+            // feature shipped — surface that distinctly rather than a generic mismatch, since
+            // no DOB entered by the parent could ever satisfy the check below.
+            return Unauthorized(new { error = "dob_not_set", message = "This student's date of birth hasn't been recorded yet; contact the school to enable parent login." });
+        }
+
+        if (student.DateOfBirth != request.DateOfBirth)
         {
             return Unauthorized(new { error = "invalid_credentials", message = "No student matches that roll number and date of birth." });
         }

@@ -30,13 +30,9 @@ public class MarksController(AppDbContext db) : ControllerBase
     // PRT-02 — attendance + published marks only, matching SDA-15's publish rule.
     [HttpGet("ward/{studentId}")]
     [Authorize]
+    [ServiceFilter(typeof(WardAccessFilter))]
     public async Task<ActionResult<WardRecordResponse>> Ward(Guid studentId)
     {
-        if (await ParentWardAccess.GetAuthorizedParentIdAsync(db, User, studentId) is null)
-        {
-            return Forbid();
-        }
-
         var student = await db.Users.FindAsync(studentId);
         if (student is null)
         {
