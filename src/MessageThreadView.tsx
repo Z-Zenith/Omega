@@ -3,7 +3,7 @@
  * "composing and reading messages to/from teachers").
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type {
   DirectMessage,
   DmsError,
@@ -18,8 +18,22 @@ export const MessageThreadView = forwardRef<MessageThreadViewApi, MessageThreadV
     const [error, setError] = useState<DmsError | null>(null);
     const [sending, setSending] = useState(false);
 
+    // Read via a ref rather than an effect dependency: an embedder-supplied inline
+    // callback gets a fresh identity every parent render, and depending on it directly
+    // would refetch on every render instead of only when the open thread changes.
+    const onListMessagesRef = useRef(onListMessages);
+    onListMessagesRef.current = onListMessages;
+
+    // Bumped on every load; guards against switching threads quickly (open A, then
+    // B before A's fetch resolves) from letting A's late response clobber B's
+    // already-loaded messages.
+    const generationRef = useRef(0);
+
     const load = async () => {
-      const result = await onListMessages(thread.id);
+      const generation = ++generationRef.current;
+      const threadId = thread.id;
+      const result = await onListMessagesRef.current(threadId);
+      if (generationRef.current !== generation) return;
       if (result.ok) {
         setMessages(result.value);
         setError(null);
@@ -30,10 +44,13 @@ export const MessageThreadView = forwardRef<MessageThreadViewApi, MessageThreadV
 
     useEffect(() => {
       load();
+      return () => {
+        generationRef.current++;
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [thread.id, onListMessages]);
+    }, [thread.id]);
 
-    useImperativeHandle(ref, () => ({ reload: load }), [thread.id, onListMessages]);
+    useImperativeHandle(ref, () => ({ reload: load }), [thread.id]);
 
     const handleSend = async () => {
       const content = draft.trim();
