@@ -264,6 +264,30 @@ public class MaterialsControllerTests
         Assert.IsType<ForbidResult>(result);
     }
 
+    // API-03: acceptance-critical — the subject's own assigned teacher can view its
+    // material even before any TimetableSlot exists for that subject (e.g. newly
+    // assigned, not yet scheduled), and even if they didn't upload the material.
+    [Fact]
+    public async Task Api03_DownloadMaterial_AllowsSubjectTeacherWithNoTimetableSlotYet()
+    {
+        await using var db = NewDb();
+        var department = new Department { Id = Guid.NewGuid(), Name = "CS", CollegeId = Guid.NewGuid() };
+        var subjectTeacher = NewUser(AccountType.Teacher, department.CollegeId);
+        var admin = NewUser(AccountType.AdminTier, department.CollegeId);
+        db.Departments.Add(department);
+        db.Users.AddRange(subjectTeacher, admin);
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS101", Name = "Intro", TeacherId = subjectTeacher.Id };
+        db.Subjects.Add(subject);
+        var material = new Material { Id = Guid.NewGuid(), Title = "Notes", FileUrl = "https://files.example/a.pdf", SubjectId = subject.Id, UploadedBy = admin.Id, UploadedAt = DateTime.UtcNow };
+        db.Materials.Add(material);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, subjectTeacher);
+        var result = await controller.DownloadMaterial(material.Id);
+
+        Assert.IsType<RedirectResult>(result);
+    }
+
     // API-03
     [Fact]
     public async Task Api03_DownloadMaterial_AllowsAdminForAnyMaterial()
