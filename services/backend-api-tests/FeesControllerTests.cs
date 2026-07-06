@@ -122,6 +122,58 @@ public class FeesControllerTests
         Assert.IsType<BadRequestObjectResult>(result.Result);
     }
 
+    // AWA-04
+    [Fact]
+    public async Task Awa04_CreateLink_RejectsAbsurdlyLargeAmount()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student);
+        db.Users.AddRange(admin, student);
+        db.PermissionGrants.Add(GrantManageFees(admin.Id));
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.CreateLink(new CreateFeeLinkRequest(student.Id, 50_000_000m, new DateOnly(2026, 8, 1)));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    // AWA-04
+    [Theory]
+    [InlineData(2020, 1, 1)] // clearly in the past
+    public async Task Awa04_CreateLink_RejectsPastDueDate(int year, int month, int day)
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student);
+        db.Users.AddRange(admin, student);
+        db.PermissionGrants.Add(GrantManageFees(admin.Id));
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.CreateLink(new CreateFeeLinkRequest(student.Id, 5000m, new DateOnly(year, month, day)));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    // AWA-04
+    [Fact]
+    public async Task Awa04_CreateLink_RejectsDefaultDueDate()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student);
+        db.Users.AddRange(admin, student);
+        db.PermissionGrants.Add(GrantManageFees(admin.Id));
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.CreateLink(new CreateFeeLinkRequest(student.Id, 5000m, default));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
     // AWA-04: acceptance-critical — the link must resolve to exactly the amount/period
     // it was generated for, which is why each call mints its own FeeRecord rather than
     // reusing/mutating an existing one.

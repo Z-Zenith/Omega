@@ -26,9 +26,14 @@ public class FeesController(AppDbContext db, IPermissionService permissions) : C
             return Forbid();
         }
 
-        if (request.Amount <= 0)
+        if (request.Amount <= 0 || request.Amount > 10_000_000m)
         {
-            return BadRequest(new { error = "invalid_amount", message = "Fee amount must be greater than zero." });
+            return BadRequest(new { error = "invalid_amount", message = "Fee amount must be greater than zero and no more than 10,000,000." });
+        }
+
+        if (request.DueDate == default || request.DueDate < DateOnly.FromDateTime(DateTime.UtcNow))
+        {
+            return BadRequest(new { error = "invalid_due_date", message = "Due date must be a real date that isn't in the past." });
         }
 
         var student = await db.Users.FindAsync(request.StudentId);
