@@ -28,7 +28,14 @@ def _normalize(content: str) -> str:
     return re.sub(r"\s+", " ", content).strip().lower()
 
 def _keyword_present(keyword: str, normalized_content: str) -> bool:
-    pattern = r"\b" + re.escape(keyword.strip().lower()) + r"\b"
+    kw = keyword.strip().lower()
+    # \b only fires at a word/non-word transition, so a keyword that itself starts or
+    # ends in punctuation (e.g. "o(1)", "e.g.") has no such transition against adjacent
+    # whitespace and would never match. Fall back to "not immediately touching another
+    # non-space character" for that edge instead of requiring a \b there.
+    left = r"\b" if re.match(r"\w", kw[0]) else r"(?<!\S)"
+    right = r"\b" if re.match(r"\w", kw[-1]) else r"(?!\S)"
+    pattern = left + re.escape(kw) + right
     return re.search(pattern, normalized_content) is not None
 
 def generate_autograde_suggestion(
@@ -81,8 +88,11 @@ def generate_autograde_suggestion(
     suggested_grade = round(min(matched_ratio, 1.0) * max_score, 2)
 
     length_factor = min(len(normalized_content) / _MIN_CONTENT_LENGTH_FOR_FULL_CONFIDENCE, 1.0)
+    # Clamped like suggested_grade above: matched_ratio is only guaranteed in [0, 1] when
+    # rubric weights are themselves in (0, 1] summing to ~1.0, which is enforced by the API
+    # layer's Pydantic validation but not by this function itself.
     confidence = round(
-        (_BASE_CONFIDENCE + _MATCHED_RATIO_CONFIDENCE_WEIGHT * matched_ratio) * length_factor,
+        max(0.0, min((_BASE_CONFIDENCE + _MATCHED_RATIO_CONFIDENCE_WEIGHT * matched_ratio) * length_factor, 1.0)),
         2,
     )
 

@@ -51,6 +51,27 @@ def test_ais_04_respects_custom_max_score():
     assert suggestion["suggested_grade"] == 10.0
     assert suggestion["max_score"] == 10.0
 
+def test_ais_04_matches_keyword_ending_in_punctuation():
+    content = "the algorithm runs in o(1) always"
+    rubric = [{"name": "Constant time", "keywords": ["o(1)"], "weight": 1.0}]
+    suggestion = generate_autograde_suggestion(content, rubric, max_score=100.0)
+    assert suggestion["suggested_grade"] == 100.0
+
+def test_ais_04_matches_keyword_ending_in_period():
+    content = "consider e.g. this case"
+    rubric = [{"name": "Uses example", "keywords": ["e.g."], "weight": 1.0}]
+    suggestion = generate_autograde_suggestion(content, rubric, max_score=100.0)
+    assert suggestion["suggested_grade"] == 100.0
+
+def test_ais_04_confidence_is_clamped_even_with_out_of_range_weights():
+    # Bypasses the API's Pydantic weight validation to exercise the function's own guard.
+    rubric = [
+        {"name": "A", "keywords": ["def"], "weight": 2.0},
+        {"name": "B", "keywords": ["missing"], "weight": -1.0},
+    ]
+    suggestion = generate_autograde_suggestion("def factorial(n): return 1", rubric, max_score=100.0)
+    assert 0.0 <= suggestion["confidence"] <= 1.0
+
 # --- Integration tests for the /api/v1/autograde endpoint ---
 
 def test_ais_04_api_autograde_success():
