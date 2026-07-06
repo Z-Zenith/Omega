@@ -122,6 +122,23 @@ void _codeEditor;
 const _annotationChange: AnnotationChange = { op: 'delete', id: 'a1' };
 void _annotationChange;
 
+const _documentViewer: DocumentViewerProps = {
+  user,
+  document: { id: 'd1', type: 'pdf', fileUrl: 'https://example.com/d1.pdf' },
+  initialAnnotations: [],
+  canAnnotate: true,
+  canOcr: true,
+  onAnnotationChange: async (_change: AnnotationChange): Promise<Result<Annotation, SekError>> => ({
+    ok: true,
+    value: { kind: 'highlight', id: 'a1', page: 1, rect: { x: 0, y: 0, width: 0.1, height: 0.1 }, color: '#FFEB3B', createdAt: '', createdBy: 'u1' },
+  }),
+  onOcrPage: async (_page: number): Promise<Result<OcrPageResult, SekError>> => ({
+    ok: true,
+    value: { page: 1, text: '', words: [] },
+  }),
+};
+void _documentViewer;
+
 // SEK-03 — NoteLinkRef round-trips
 const _link: NoteLinkRef = { toNoteId: 'n2', anchor: 'see also' };
 void _link;

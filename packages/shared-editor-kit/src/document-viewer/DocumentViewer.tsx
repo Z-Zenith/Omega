@@ -22,6 +22,7 @@ import type { SekError } from '../types/common.js';
 import type {
   Annotation,
   AnnotationChange,
+  DocumentType,
   DocumentViewerApi,
   DocumentViewerProps,
   HighlightAnnotation,
@@ -49,8 +50,12 @@ const INK_COLOR = '#1E88E5';
 const INK_WIDTH = 2; // CSS pixels at 1x zoom — see InkStroke.width in types/common.ts
 const FALLBACK_SURFACE_WIDTH_PX = 800; // used only until the surface is first measured
 
-/** Closed set of document types this viewer knows how to render. */
-const KNOWN_DOCUMENT_TYPES: ReadonlySet<string> = new Set(['pdf', 'pptx', 'docx']);
+// Record<DocumentType, true> forces this to have exactly one key per
+// DocumentType literal — if the contract ever grows a 4th document type,
+// this fails to compile instead of silently marking it "unsupported" at
+// runtime, unlike a hand-written Set would.
+const DOCUMENT_TYPE_RECORD: Record<DocumentType, true> = { pdf: true, pptx: true, docx: true };
+const KNOWN_DOCUMENT_TYPES: ReadonlySet<string> = new Set(Object.keys(DOCUMENT_TYPE_RECORD));
 
 function newAnnotationId(): string {
   // crypto.randomUUID is available in every embedder runtime we target
@@ -60,7 +65,9 @@ function newAnnotationId(): string {
 
 export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>(
   function DocumentViewer(
-    { user, document, initialAnnotations, canAnnotate, canOcr, onAnnotationChange, onOcrPage },
+    // Aliased away from `document` — that name would shadow the global DOM
+    // `document` object for the rest of the component body.
+    { user, document: doc, initialAnnotations, canAnnotate, canOcr, onAnnotationChange, onOcrPage },
     ref
   ) {
     const [page, setPage] = useState(1);
@@ -84,9 +91,19 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
     // pattern as NotesEditor's contentRef.
     const annotationsRef = useRef(annotations);
     annotationsRef.current = annotations;
+    // Bumped whenever the page or document changes, so an in-flight OCR
+    // request that resolves after the user has already navigated away can
+    // recognize itself as stale and skip applying its (now-wrong-page)
+    // result instead of silently overwriting whatever the user is now
+    // looking at.
+    const ocrRequestIdRef = useRef(0);
+    // The pointer id that started the current draft. Without this, a second
+    // finger touching the surface mid-drag (or any other stray pointer)
+    // would feed its coordinates into the same in-progress draft.
+    const activePointerIdRef = useRef<number | null>(null);
 
-    const canAnnotatePdf = canAnnotate && document.type === 'pdf';
-    const canOcrPdf = canOcr && document.type === 'pdf';
+    const canAnnotatePdf = canAnnotate && doc.type === 'pdf';
+    const canOcrPdf = canOcr && doc.type === 'pdf';
 
     // Reset the draft whenever the embedder swaps which document is open.
     useEffect(() => {
@@ -97,17 +114,22 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
       setPendingTextBox(null);
       setEditingTextBoxId(null);
       setOcrResult(null);
-      setError(KNOWN_DOCUMENT_TYPES.has(document.type)
+      setOcrLoading(false);
+      ocrRequestIdRef.current += 1;
+      setError(KNOWN_DOCUMENT_TYPES.has(doc.type)
         ? null
-        : { code: 'unsupported_document_type', message: `Unsupported document type: "${document.type}".` });
+        : { code: 'unsupported_document_type', message: `Unsupported document type: "${doc.type}".` });
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [document.id]);
+    }, [doc.id, doc.type]);
 
     // OCR is only meaningful for the page it was run against — an OCR result
     // from a page the user has since navigated away from would otherwise keep
-    // rendering under the new page with no indication it's stale.
+    // rendering under the new page with no indication it's stale. Bumping the
+    // request id also invalidates any OCR call still in flight for the old page.
     useEffect(() => {
       setOcrResult(null);
+      setOcrLoading(false);
+      ocrRequestIdRef.current += 1;
     }, [page]);
 
     // The ink-stroke SVG overlay uses a 0..1 viewBox, but InkStroke.width is
@@ -127,10 +149,13 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
     useImperativeHandle(
       ref,
       (): DocumentViewerApi => ({
-        goToPage: (target) => setPage(clampPage(target, document.pageCount)),
+        goToPage: (target) => setPage(clampPage(target, doc.pageCount)),
         getAnnotations: () => annotationsRef.current,
       }),
-      [document.pageCount]
+      // Rebind whenever the document identity changes too, not just its page
+      // count — two different documents could otherwise share a pageCount
+      // and leave a stale closure in place.
+      [doc.id, doc.pageCount]
     );
 
     const toNormalizedPoint = (clientX: number, clientY: number): Point | null => {
@@ -164,14 +189,23 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
     };
 
     const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!canAnnotatePdf || !activeTool || pendingTextBox) return;
+      if (!canAnnotatePdf || !activeTool || pendingTextBox || editingTextBoxId) return;
+      if (activePointerIdRef.current !== null) return; // a gesture is already in progress
       const pt = toNormalizedPoint(e.clientX, e.clientY);
       if (!pt) return;
+      activePointerIdRef.current = e.pointerId;
       setDraft(activeTool === 'ink' ? { kind: 'ink', points: [pt] } : { kind: activeTool, start: pt, current: pt });
     };
 
     const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!draft) return;
+      if (!draft || e.pointerId !== activePointerIdRef.current) return;
+      if (!canAnnotatePdf) {
+        // Permission was revoked mid-drag (e.g. an embedder-pushed role
+        // change) — abandon the gesture rather than let pointerup commit it.
+        setDraft(null);
+        activePointerIdRef.current = null;
+        return;
+      }
       const pt = toNormalizedPoint(e.clientX, e.clientY);
       if (!pt) return;
       setDraft(
@@ -179,8 +213,22 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
       );
     };
 
-    const handlePointerUp = () => {
-      if (!draft) return;
+    // A true pointer cancel (browser-initiated gesture interruption) discards
+    // the in-progress draft without committing it — unlike pointerup/leave,
+    // which finish the gesture normally.
+    const handlePointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.pointerId !== activePointerIdRef.current) return;
+      setDraft(null);
+      activePointerIdRef.current = null;
+    };
+
+    const handlePointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!draft || e.pointerId !== activePointerIdRef.current) return;
+      activePointerIdRef.current = null;
+      if (!canAnnotatePdf) {
+        setDraft(null);
+        return;
+      }
       if (draft.kind === 'ink') {
         if (isStrokeSizable(draft.points)) {
           const annotation: InkAnnotation = {
@@ -250,7 +298,10 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
     };
 
     const startEditingTextBox = (annotation: TextBoxAnnotation) => {
-      if (!canAnnotatePdf) return;
+      // Refuse to switch to editing a different text box while one is
+      // already being edited — textDraft is shared, so switching without
+      // saving/cancelling first would silently discard the unsaved edit.
+      if (!canAnnotatePdf || (editingTextBoxId && editingTextBoxId !== annotation.id)) return;
       setEditingTextBoxId(annotation.id);
       setTextDraft(annotation.text);
     };
@@ -272,8 +323,13 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
     };
 
     const runOcr = async () => {
+      const requestId = ++ocrRequestIdRef.current;
       setOcrLoading(true);
       const result = await onOcrPage(page);
+      // The page or document changed while this request was in flight —
+      // applying it now would show OCR text for whatever the user was
+      // looking at when they clicked "Run OCR", not what's on screen now.
+      if (ocrRequestIdRef.current !== requestId) return;
       setOcrLoading(false);
       if (result.ok) {
         setError(null);
@@ -294,7 +350,7 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
     // whatever page it was last scrolled to while the annotation overlay
     // moved on without it. No equivalent exists for pptx/docx (browsers have
     // no built-in Office viewer), so those remain a known, view-only gap.
-    const iframeSrc = document.type === 'pdf' ? `${document.fileUrl}#page=${page}` : document.fileUrl;
+    const iframeSrc = doc.type === 'pdf' ? `${doc.fileUrl}#page=${page}` : doc.fileUrl;
 
     return (
       <div className="sek-document-viewer">
@@ -305,17 +361,17 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
         )}
 
         <div className="sek-document-viewer__toolbar">
-          <button type="button" onClick={() => setPage((p) => clampPage(p - 1, document.pageCount))} disabled={page <= 1}>
+          <button type="button" onClick={() => setPage((p) => clampPage(p - 1, doc.pageCount))} disabled={page <= 1}>
             Previous page
           </button>
           <span className="sek-document-viewer__page-indicator">
             Page {page}
-            {document.pageCount ? ` of ${document.pageCount}` : ''}
+            {doc.pageCount ? ` of ${doc.pageCount}` : ''}
           </span>
           <button
             type="button"
-            onClick={() => setPage((p) => clampPage(p + 1, document.pageCount))}
-            disabled={document.pageCount !== undefined && page >= document.pageCount}
+            onClick={() => setPage((p) => clampPage(p + 1, doc.pageCount))}
+            disabled={!!doc.pageCount && page >= doc.pageCount}
           >
             Next page
           </button>
@@ -342,9 +398,9 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
           )}
         </div>
 
-        {document.type !== 'pdf' && KNOWN_DOCUMENT_TYPES.has(document.type) && (
+        {doc.type !== 'pdf' && KNOWN_DOCUMENT_TYPES.has(doc.type) && (
           <p className="sek-document-viewer__view-only-hint">
-            {document.type.toUpperCase()} documents are view-only — annotations and OCR are PDF-only.
+            {doc.type.toUpperCase()} documents are view-only — annotations and OCR are PDF-only.
           </p>
         )}
 
@@ -355,14 +411,15 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
         >
           <iframe
             className="sek-document-viewer__frame"
-            title={document.title ?? document.fileUrl}
+            title={doc.title ?? doc.fileUrl}
             src={iframeSrc}
           />
 
-          {document.type === 'pdf' && (
+          {doc.type === 'pdf' && (
             <svg
               className="sek-document-viewer__overlay"
               viewBox="0 0 1 1"
@@ -436,7 +493,7 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
           </div>
         )}
 
-        {document.type === 'pdf' && pageAnnotations.length > 0 && (
+        {doc.type === 'pdf' && pageAnnotations.length > 0 && (
           <ul className="sek-document-viewer__annotations">
             {pageAnnotations.map((a) => (
               <li key={a.id} data-kind={a.kind}>
@@ -453,11 +510,11 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
                 ) : (
                   <>
                     <span>
-                      {a.kind === 'highlight' && 'Highlight'}
+                      {a.kind === 'highlight' && (a.note ? `Highlight: ${a.note}` : 'Highlight')}
                       {a.kind === 'textBox' && a.text}
                       {a.kind === 'ink' && 'Ink stroke'}
                     </span>
-                    {canAnnotatePdf && a.kind === 'textBox' && (
+                    {canAnnotatePdf && a.kind === 'textBox' && !editingTextBoxId && (
                       <button type="button" onClick={() => startEditingTextBox(a)}>
                         Edit
                       </button>
@@ -486,6 +543,8 @@ export const DocumentViewer = forwardRef<DocumentViewerApi, DocumentViewerProps>
 );
 
 function clampPage(target: number, pageCount: number | undefined): number {
-  const upper = pageCount ?? Number.POSITIVE_INFINITY;
+  // A pageCount of 0 (or negative) is treated the same as "unknown" rather
+  // than clamping the page to 0 — pages are 1-indexed, so 0 is never valid.
+  const upper = pageCount && pageCount > 0 ? pageCount : Number.POSITIVE_INFINITY;
   return Math.min(Math.max(1, target), upper);
 }
