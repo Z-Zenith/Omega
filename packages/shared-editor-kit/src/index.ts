@@ -14,7 +14,7 @@
  *
  * Status of the five features:
  *   - SEK-01 (Code editor)            — Must — interface only.
- *   - SEK-02 (Document viewer)        — Must — interface only.
+ *   - SEK-02 (Document viewer)        — Must — implemented (DocumentViewer).
  *   - SEK-03 (Markdown notes)         — Must — implemented (NotesEditor).
  *   - SEK-04 (Built-in image search)  — Could — interface only.
  *   - SEK-05 (Inking w/ diagrams)     — Won't — deliberately NOT defined here.
@@ -69,6 +69,7 @@ export type {
   DocumentViewerApi,
   AnnotationChange,
 } from './document-viewer/index.js';
+export { DocumentViewer } from './document-viewer/index.js';
 
 // SEK-03 — Markdown notes
 export type {

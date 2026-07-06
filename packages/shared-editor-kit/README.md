@@ -9,7 +9,7 @@ Public TypeScript interface for the **Shared Editor Kit (SEK)** — the cross-co
 | ID | Feature | Status in this package |
 |---|---|---|
 | [SEK-01](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Code editor (C, C++, Python, Java, .NET, HTML, CSS, JS/TS, Node, SQL, JSON, YAML) | Interface only |
-| [SEK-02](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Document viewer & annotator (PDF/PPTX/DOCX, highlights/textboxes/ink, OCR) | Interface only |
+| [SEK-02](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Document viewer & annotator (PDF/PPTX/DOCX, highlights/textboxes/ink, OCR) | **Implemented** — `DocumentViewer` |
 | [SEK-03](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Markdown notes (Obsidian-style linked notes) | **Implemented** — `NotesEditor` + `extractOutgoingLinks` |
 | [SEK-04](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Built-in image search (inside the notes editor) | Interface only |
 | [SEK-05](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Inking w/ block diagrams | **Not defined** — Won't priority; will reuse the shared `InkStroke` primitive when promoted |
@@ -70,5 +70,23 @@ pnpm test          # typecheck, then runs runtime tests (tests/*.test.ts) via `n
 
 Runtime tests use Node's built-in test runner directly against `.ts` sources (Node 22+ type
 stripping) rather than adding a separate test-framework dependency — see
-`tests/notes.linkExtraction.test.ts` for the pattern. Component-level (React rendering) tests
-for SEK-01/02/04 land alongside those implementations when they're built.
+`tests/notes.linkExtraction.test.ts` and `tests/document-viewer.geometry.test.ts` for the
+pattern: framework-agnostic logic (link extraction, overlay geometry) gets a runtime test;
+the React component itself is exercised by the embedder's own test suite (no DOM test
+renderer is a devDependency here yet). Component-level (React rendering) tests for SEK-01/04
+land alongside those implementations when they're built.
+
+## Notes on the DocumentViewer implementation (SEK-02)
+
+- **Rendering strategy.** The document itself is shown via an `<iframe>` pointing at
+  `DocumentDescriptor.fileUrl` (the browser's native PDF/Office viewer), not a custom
+  PDF.js-style renderer — no such rendering dependency exists in this package yet, and the
+  acceptance criterion is about annotation *persistence*, not pixel-perfect rendering. An SVG
+  overlay (`viewBox="0 0 1 1"`) sits on top for the annotation shapes, which is what makes the
+  normalized 0..1 coordinates in `Annotation` resolution-independent.
+- **Annotation is PDF-only**, per spec — the pointer-drag overlay and OCR controls only mount
+  when `document.type === 'pdf'`; pptx/docx render view-only with a hint explaining why.
+- **OCR is scoped to triggering + rendering `onOcrPage`'s result**, labeled "best-effort" in
+  the UI per the spec's "basic OCR" framing. The actual OCR model lives in the AI Services
+  container — this component only calls the embedder-supplied callback and shows what comes
+  back.
