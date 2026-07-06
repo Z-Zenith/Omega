@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.similarity import compute_pairwise_similarity, SubmissionItem, SimilarityMatch
 from src.anomaly import detect_suspicious_behaviour, TelemetryEvent, SuspiciousFlag
+from src.autograde import generate_autograde_suggestion, RubricCriterion
 from src.browsing_summary import generate_browsing_summary, BrowsingVisit
 
 # Configure logging
@@ -122,6 +123,49 @@ class SuspiciousFlagSchema(BaseModel):
 class SuspiciousBehaviourResponse(BaseModel):
     flags: List[SuspiciousFlagSchema]
 
+class RubricCriterionSchema(BaseModel):
+    name: str = Field(..., description="Rubric criterion label shown to the teacher")
+    keywords: List[str] = Field(
+        ..., min_length=1, description="Any one of these (case-insensitive, whole-word) satisfies the criterion"
+    )
+    weight: float = Field(..., gt=0.0, le=1.0, description="Fraction of max_score this criterion is worth")
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_empty(cls, v: str) -> str:
+        return _require_non_empty(v)
+
+    @field_validator("keywords")
+    @classmethod
+    def keywords_must_not_be_empty(cls, v: List[str]) -> List[str]:
+        if not all(kw.strip() for kw in v):
+            raise ValueError("keywords must not contain empty or whitespace-only entries")
+        return v
+
+class AutogradeRequest(BaseModel):
+    content: str = Field(..., description="The student's submission text or code")
+    rubric: List[RubricCriterionSchema] = Field(
+        ..., min_length=1, description="Criteria to check the submission against"
+    )
+    max_score: float = Field(100.0, gt=0.0, description="Maximum score for this assignment")
+
+    @model_validator(mode="after")
+    def rubric_weights_must_sum_to_one(self):
+        # A rubric whose weights don't sum to ~1.0 either under- or over-awards
+        # max_score — catch the authoring mistake here rather than silently
+        # producing a suggested grade that doesn't match the stated max_score.
+        total_weight = sum(c.weight for c in self.rubric)
+        if abs(total_weight - 1.0) > 0.01:
+            raise ValueError(f"rubric weights must sum to 1.0 (got {total_weight:.4f})")
+        return self
+
+class AutogradeResponse(BaseModel):
+    suggested_grade: float
+    max_score: float
+    confidence: float
+    matched_criteria: List[str]
+    feedback: List[str]
+
 class BrowsingVisitSchema(BaseModel):
     url: str = Field(..., description="Visited page URL")
     visited_at: datetime = Field(..., description="Client-reported visit timestamp")
@@ -229,6 +273,38 @@ async def check_suspicious_behaviour(payload: SuspiciousBehaviourRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to complete suspicious-behaviour analysis"
+        )
+
+@app.post(
+    "/api/v1/autograde",
+    response_model=AutogradeResponse,
+    status_code=status.HTTP_200_OK
+)
+async def suggest_autograde(payload: AutogradeRequest):
+    """
+    Suggests a grade for a submission against a weighted rubric (AIS-04). This is
+    advisory only — callers must surface it exclusively in the Teacher Web App for
+    review and must never auto-publish it or show it to the submitting student as-is.
+    """
+    try:
+        rubric_data: List[RubricCriterion] = [
+            {"name": c.name, "keywords": c.keywords, "weight": c.weight}
+            for c in payload.rubric
+        ]
+
+        suggestion = generate_autograde_suggestion(
+            payload.content,
+            rubric_data,
+            max_score=payload.max_score
+        )
+
+        return suggestion
+
+    except Exception as e:
+        logger.error(f"Internal error processing autograde request: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to complete autograde suggestion"
         )
 
 @app.post(
