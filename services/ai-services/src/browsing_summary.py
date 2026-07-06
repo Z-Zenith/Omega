@@ -14,7 +14,12 @@ class BrowsingVisit(TypedDict):
 _TOP_DOMAINS_IN_SUMMARY = 3
 
 def _domain_of(url: str) -> str:
-    netloc = urlparse(url).netloc or url
+    # urlparse only populates netloc when the URL has a "//" authority section; a
+    # schemeless URL like "example.com/page" would otherwise fall through to using the
+    # raw string (path included) as the "domain", breaking grouping. Domain names are
+    # also case-insensitive, so lowercase before grouping.
+    parseable = url if "//" in url else f"//{url}"
+    netloc = (urlparse(parseable).netloc or url).lower()
     return netloc[4:] if netloc.startswith("www.") else netloc
 
 def generate_browsing_summary(visits: List[BrowsingVisit]) -> str:
