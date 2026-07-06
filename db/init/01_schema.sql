@@ -74,10 +74,25 @@ CREATE TABLE IF NOT EXISTS users (
     totp_secret     text,                   -- encrypted at the application layer
     full_name       text NOT NULL,
     department_id   uuid REFERENCES departments(id) ON DELETE SET NULL,
+    date_of_birth   date,                   -- PRT-01: students only, used as the parent-login credential
     is_active       boolean NOT NULL DEFAULT true,
     created_at      timestamptz NOT NULL DEFAULT now(),
     UNIQUE (college_id, identifier)
 );
+
+-- PRT-01/02/03: which parent account may view which student's data. A parent logs in with
+-- the ward's roll number + DOB (see AuthContracts/ParentController); this table is the
+-- authorization gate so knowing those two values isn't sufficient on its own — the student
+-- must already be registered as that parent's ward.
+CREATE TABLE IF NOT EXISTS parent_wards (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    parent_user_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    student_id      uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (parent_user_id, student_id)
+);
+CREATE INDEX IF NOT EXISTS idx_parent_wards_student
+    ON parent_wards (student_id);
 
 CREATE TABLE IF NOT EXISTS permissions (
     code        text PRIMARY KEY,
