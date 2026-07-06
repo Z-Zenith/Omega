@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -37,6 +38,10 @@ public partial class EventItemViewModel(ApiClient apiClient, Guid id, string tit
         catch (ApiException ex)
         {
             ErrorMessage = ex.Message;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            ErrorMessage = "Could not reach the server. Check your connection and try again.";
         }
         finally
         {
