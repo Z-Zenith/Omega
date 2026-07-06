@@ -148,6 +148,10 @@ public class CalendarController(AppDbContext db, IPermissionService permissions)
             .Include(s => s.Teacher)
             .ToListAsync();
 
+        // TODO: DateTime.UtcNow is used for "today" here; this can shift the
+        // weekly boundary for non-UTC colleges near midnight. Needs a
+        // College.TimeZone column (schema change - requires sign-off) to fix
+        // properly. Tracked as a follow-up, not blocking this PR.
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var monday = today.AddDays(-((int)today.DayOfWeek == 0 ? 6 : (int)today.DayOfWeek - 1));
 

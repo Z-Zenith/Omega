@@ -63,18 +63,29 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         db.TimetableSlots.RemoveRange(toRemove);
 
         // An assignment already satisfied by a manually-edited slot shouldn't get a second,
-        // auto-generated slot alongside it.
+        // auto-generated slot alongside it. Keyed by (section, subject) rather than also
+        // including teacher, because PatchSlot can reassign a manual slot's teacher — if the
+        // key included the original teacher, that reassignment would make the original
+        // assignment look uncovered and spawn a duplicate auto-generated slot for it.
         var manuallyCoveredAssignments = existingSlots
             .Where(s => s.ManuallyEdited)
-            .Select(s => (s.SectionId, s.SubjectId, s.TeacherId))
+            .Select(s => (s.SectionId, s.SubjectId))
             .ToHashSet();
 
         var occupiedCells = existingSlots
             .Where(s => s.ManuallyEdited)
             .Select(s => (s.SectionId, s.DayOfWeek, s.StartTime))
             .ToHashSet();
-        var teacherBusy = existingSlots
-            .Where(s => s.ManuallyEdited)
+
+        // Teacher-conflict checks must not be limited to sectionIds in scope: a teacher may
+        // also teach sections outside this department, and slots there aren't being touched
+        // by this generation run (department-scoped regeneration otherwise risks double-
+        // booking that teacher into an out-of-scope commitment).
+        var relevantTeacherIds = assignments.Select(a => a.TeacherId).Distinct().ToList();
+        var teacherBusy = (await db.TimetableSlots
+                .Where(s => relevantTeacherIds.Contains(s.TeacherId) && (s.ManuallyEdited || !sectionIds.Contains(s.SectionId)))
+                .Select(s => new { s.TeacherId, s.DayOfWeek, s.StartTime })
+                .ToListAsync())
             .Select(s => (s.TeacherId, s.DayOfWeek, s.StartTime))
             .ToHashSet();
 
@@ -85,7 +96,7 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
             {
                 continue;
             }
-            if (manuallyCoveredAssignments.Contains((assignment.SectionId, assignment.SubjectId, assignment.TeacherId)))
+            if (manuallyCoveredAssignments.Contains((assignment.SectionId, assignment.SubjectId)))
             {
                 continue;
             }
