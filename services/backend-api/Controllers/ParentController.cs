@@ -19,10 +19,15 @@ public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService)
     [AllowAnonymous]
     public async Task<ActionResult<ParentLoginResponse>> Login(ParentLoginRequest request)
     {
-        var student = await db.Users
+        // Identifier is only unique per (college_id, identifier), not globally — a roll number
+        // can legitimately collide across colleges. Fail closed on ambiguity rather than
+        // arbitrarily picking one match, since that could silently authenticate a parent
+        // against a different college's student.
+        var matchingStudents = await db.Users
             .Where(u => u.Identifier == request.RollNumber && u.AccountType == AccountType.Student)
-            .OrderBy(u => u.CreatedAt)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
+
+        var student = matchingStudents.Count == 1 ? matchingStudents[0] : null;
 
         if (student is null || student.DateOfBirth != request.DateOfBirth)
         {
@@ -34,13 +39,26 @@ public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService)
             return Unauthorized(new { error = "account_inactive", message = "This student's account has been deactivated." });
         }
 
-        var wardLink = await db.ParentWards
+        var wardLinks = await db.ParentWards
             .Include(w => w.ParentUser)
             .Where(w => w.StudentId == student.Id)
-            .OrderBy(w => w.CreatedAt)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
 
-        if (wardLink is null || !wardLink.ParentUser.IsActive)
+        if (wardLinks.Count == 0)
+        {
+            return Unauthorized(new { error = "no_registered_parent", message = "No parent account is registered for this student." });
+        }
+
+        if (wardLinks.Count > 1)
+        {
+            // The roll number + DOB credential identifies the ward, not which parent is
+            // logging in. With more than one guardian registered we can't safely tell them
+            // apart, so fail closed rather than always resolving to the same one.
+            return Unauthorized(new { error = "ambiguous_parent", message = "Multiple parent accounts are registered for this student; contact the school to resolve this before signing in." });
+        }
+
+        var wardLink = wardLinks[0];
+        if (!wardLink.ParentUser.IsActive)
         {
             return Unauthorized(new { error = "no_registered_parent", message = "No parent account is registered for this student." });
         }
