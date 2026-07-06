@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +10,7 @@ namespace BackendApi.Controllers;
 
 [ApiController]
 [Route("api/v1")]
+[Authorize]
 public class MessagingController(AppDbContext db) : ControllerBase
 {
     // DMS-01 (Track 2) — get-or-create the single thread for a student-teacher pair.
@@ -21,6 +24,16 @@ public class MessagingController(AppDbContext db) : ControllerBase
         if (request.StudentId == request.TeacherId)
         {
             return BadRequest("StudentId and TeacherId must be different users.");
+        }
+
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && caller.Id != request.StudentId && caller.Id != request.TeacherId)
+        {
+            return Forbid();
         }
 
         var student = await db.Users.FindAsync(request.StudentId);
@@ -55,7 +68,8 @@ public class MessagingController(AppDbContext db) : ControllerBase
         return CreatedAtAction(nameof(ListMessages), new { id = thread.Id }, ToResponse(thread));
     }
 
-    // DMS-01 (Track 2)
+    // DMS-01 (Track 2) — sender identity comes from the caller's own session, never from
+    // the request body, so a participant can't send a message impersonating the other party.
     [HttpPost("messages/threads/{id}/messages")]
     public async Task<ActionResult<MessageResponse>> SendMessage(Guid id, SendMessageRequest request)
     {
@@ -70,16 +84,17 @@ public class MessagingController(AppDbContext db) : ControllerBase
             return NotFound();
         }
 
-        if (request.SenderId != thread.StudentId && request.SenderId != thread.TeacherId)
+        var senderId = CurrentUserId();
+        if (senderId != thread.StudentId && senderId != thread.TeacherId)
         {
-            return BadRequest("SenderId must be a participant of this thread.");
+            return Forbid();
         }
 
         var message = new Message
         {
             Id = Guid.NewGuid(),
             ThreadId = id,
-            SenderId = request.SenderId,
+            SenderId = senderId,
             Content = request.Content,
             SentAt = DateTime.UtcNow,
         };
@@ -91,13 +106,24 @@ public class MessagingController(AppDbContext db) : ControllerBase
 
     // DMS-01 (Track 2) — not in the original documented API map, but required to
     // actually render a thread's conversation (sending was the only documented route).
+    // Only a thread participant (or Admin) can read its messages.
     [HttpGet("messages/threads/{id}/messages")]
     public async Task<ActionResult<List<MessageResponse>>> ListMessages(Guid id)
     {
-        var threadExists = await db.MessageThreads.AnyAsync(t => t.Id == id);
-        if (!threadExists)
+        var thread = await db.MessageThreads.FindAsync(id);
+        if (thread is null)
         {
             return NotFound();
+        }
+
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && caller.Id != thread.StudentId && caller.Id != thread.TeacherId)
+        {
+            return Forbid();
         }
 
         var messages = await db.Messages
@@ -108,17 +134,13 @@ public class MessagingController(AppDbContext db) : ControllerBase
         return Ok(messages.Select(ToResponse).ToList());
     }
 
-    // DMS-01 (Track 2) — the other party's inbox, per the requirement ("deliver it to
-    // the other party's inbox in their respective app"). userId identifies which
-    // side's inbox to list (student or teacher) since there is no session-derived
-    // identity in this API yet.
+    // DMS-01 (Track 2) — the caller's own inbox, per the requirement ("deliver it to the
+    // other party's inbox in their respective app"). Always the authenticated caller's own
+    // threads — never an arbitrary userId — so one account can't read another's inbox.
     [HttpGet("messages/threads")]
-    public async Task<ActionResult<List<ThreadSummaryResponse>>> ListThreads([FromQuery] Guid userId)
+    public async Task<ActionResult<List<ThreadSummaryResponse>>> ListThreads()
     {
-        if (userId == Guid.Empty)
-        {
-            return BadRequest("userId query parameter is required.");
-        }
+        var userId = CurrentUserId();
 
         var threads = await db.MessageThreads
             .Where(t => t.StudentId == userId || t.TeacherId == userId)
@@ -151,4 +173,8 @@ public class MessagingController(AppDbContext db) : ControllerBase
 
     private static MessageResponse ToResponse(Message message) =>
         new(message.Id, message.ThreadId, message.SenderId, message.Content, message.SentAt, message.ReadAt);
+
+    private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+
+    private async Task<User?> CurrentUserAsync() => await db.Users.FindAsync(CurrentUserId());
 }
