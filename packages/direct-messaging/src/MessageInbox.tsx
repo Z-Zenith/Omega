@@ -3,7 +3,7 @@
  * messages"; also the thread-picker half of SDA-24 on the student side).
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { DmsError, MessageInboxApi, MessageInboxProps, ThreadSummary } from './types.js';
 import { getOtherPartyId } from './otherParty.js';
 
@@ -13,9 +13,22 @@ export const MessageInbox = forwardRef<MessageInboxApi, MessageInboxProps>(
     const [error, setError] = useState<DmsError | null>(null);
     const [loading, setLoading] = useState(true);
 
+    // Read via a ref rather than an effect dependency: an embedder-supplied inline
+    // callback gets a fresh identity every parent render, and depending on it directly
+    // would refetch on every render instead of only when the viewer changes.
+    const onListThreadsRef = useRef(onListThreads);
+    onListThreadsRef.current = onListThreads;
+
+    // Bumped on every load; a call whose generation has been superseded by a newer
+    // one (component unmounted, or reload() fired again before the first resolved)
+    // discards its result instead of clobbering fresher state.
+    const generationRef = useRef(0);
+
     const load = async () => {
+      const generation = ++generationRef.current;
       setLoading(true);
-      const result = await onListThreads();
+      const result = await onListThreadsRef.current();
+      if (generationRef.current !== generation) return;
       if (result.ok) {
         setThreads(result.value);
         setError(null);
@@ -27,10 +40,13 @@ export const MessageInbox = forwardRef<MessageInboxApi, MessageInboxProps>(
 
     useEffect(() => {
       load();
+      return () => {
+        generationRef.current++;
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [onListThreads]);
+    }, [user.userId]);
 
-    useImperativeHandle(ref, () => ({ reload: load }), [onListThreads]);
+    useImperativeHandle(ref, () => ({ reload: load }), []);
 
     return (
       <div className="dms-inbox">
