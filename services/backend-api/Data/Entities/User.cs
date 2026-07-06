@@ -38,6 +38,9 @@ public partial class User
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
 
+    [Column("date_of_birth")]
+    public DateOnly? DateOfBirth { get; set; }
+
     [InverseProperty("Teacher")]
     public virtual ICollection<Assignment> Assignments { get; set; } = new List<Assignment>();
 
@@ -117,6 +120,12 @@ public partial class User
 
     [InverseProperty("Recipient")]
     public virtual ICollection<Notification> Notifications { get; set; } = new List<Notification>();
+
+    [InverseProperty("ParentUser")]
+    public virtual ICollection<ParentWard> ParentWardParentUsers { get; set; } = new List<ParentWard>();
+
+    [InverseProperty("Student")]
+    public virtual ICollection<ParentWard> ParentWardStudents { get; set; } = new List<ParentWard>();
 
     [InverseProperty("GrantedByNavigation")]
     public virtual ICollection<PermissionGrant> PermissionGrantGrantedByNavigations { get; set; } = new List<PermissionGrant>();
