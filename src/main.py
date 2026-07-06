@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from src.similarity import compute_pairwise_similarity, SubmissionItem, SimilarityMatch
 from src.anomaly import detect_suspicious_behaviour, TelemetryEvent, SuspiciousFlag
 from src.autograde import generate_autograde_suggestion, RubricCriterion
+from src.browsing_summary import generate_browsing_summary, BrowsingVisit
 
 # Configure logging
 logging.basicConfig(
@@ -165,6 +166,34 @@ class AutogradeResponse(BaseModel):
     matched_criteria: List[str]
     feedback: List[str]
 
+class BrowsingVisitSchema(BaseModel):
+    url: str = Field(..., description="Visited page URL")
+    visited_at: datetime = Field(..., description="Client-reported visit timestamp")
+    duration_seconds: Optional[int] = Field(None, ge=0, description="Time spent on the page, if tracked")
+
+    @field_validator("url")
+    @classmethod
+    def url_must_not_be_empty(cls, v: str) -> str:
+        return _require_non_empty(v)
+
+    @field_validator("visited_at")
+    @classmethod
+    def normalize_visited_at(cls, v: datetime) -> datetime:
+        # Same rationale as TelemetryEventSchema.normalize_recorded_at: normalize to UTC
+        # so min()/max() over a mixed naive/aware batch doesn't crash the summary.
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v.astimezone(timezone.utc)
+
+class BrowsingSummaryRequest(BaseModel):
+    visits: List[BrowsingVisitSchema] = Field(
+        ...,
+        description="The student's recorded page visits to summarize (caller scopes the history window)"
+    )
+
+class BrowsingSummaryResponse(BaseModel):
+    summary: str
+
 # --- Routes ---
 
 @app.get("/", status_code=status.HTTP_200_OK)
@@ -276,4 +305,33 @@ async def suggest_autograde(payload: AutogradeRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to complete autograde suggestion"
+        )
+
+@app.post(
+    "/api/v1/browsing-summary",
+    response_model=BrowsingSummaryResponse,
+    status_code=status.HTTP_200_OK
+)
+async def browsing_summary(payload: BrowsingSummaryRequest):
+    """
+    Generates a natural-language summary of a student's in-app browsing history
+    (AIS-01). Visibility is enforced by the caller via the view_browsing_history
+    permission — this endpoint has no notion of who's asking and summarizes
+    whatever visit history it's handed.
+    """
+    try:
+        visit_data: List[BrowsingVisit] = [
+            {"url": v.url, "visited_at": v.visited_at, "duration_seconds": v.duration_seconds}
+            for v in payload.visits
+        ]
+
+        summary = generate_browsing_summary(visit_data)
+
+        return {"summary": summary}
+
+    except Exception as e:
+        logger.error(f"Internal error processing browsing-summary request: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to complete browsing-summary generation"
         )
