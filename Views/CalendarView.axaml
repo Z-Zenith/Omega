@@ -87,6 +87,21 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <TextBlock Text="Other class sessions" FontWeight="Bold" FontSize="14"/>
+            <ItemsControl ItemsSource="{Binding OtherClasses}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:CalendarListItemViewModel">
+                        <Border Background="#D6E4FF" CornerRadius="4" Padding="8" Margin="0,0,0,4">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Title}" FontWeight="Medium"/>
+                                <TextBlock Text="{Binding When, StringFormat='{}{0:MMM d, h:mm tt}'}" Foreground="Gray"/>
+                                <TextBlock Text="{Binding Detail}" Foreground="Gray"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </StackPanel>
     </ScrollViewer>
 

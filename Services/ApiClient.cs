@@ -62,8 +62,14 @@ public class ApiClient
         {
             return;
         }
-        await SendAsync(HttpMethod.Post, "/api/v1/auth/logout");
-        Token = null;
+        try
+        {
+            await SendAsync(HttpMethod.Post, "/api/v1/auth/logout");
+        }
+        finally
+        {
+            Token = null;
+        }
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body = null)

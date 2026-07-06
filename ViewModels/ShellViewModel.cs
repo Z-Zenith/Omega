@@ -1,4 +1,5 @@
 using System;
+using System.Net.Http;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -42,7 +43,7 @@ public partial class ShellViewModel : ViewModelBase
         {
             await _apiClient.LogoutAsync();
         }
-        catch (ApiException)
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or TaskCanceledException)
         {
             // Best-effort — the local session is cleared regardless of server-side outcome.
         }

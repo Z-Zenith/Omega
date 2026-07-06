@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using StudentDesktop.Models;
 using StudentDesktop.Services;
 
 namespace StudentDesktop.ViewModels;
@@ -25,6 +27,7 @@ public partial class CalendarViewModel : ViewModelBase
     public ObservableCollection<CalendarListItemViewModel> Todos { get; } = [];
     public ObservableCollection<CalendarListItemViewModel> CustomEntries { get; } = [];
     public ObservableCollection<CalendarListItemViewModel> OtherEvents { get; } = [];
+    public ObservableCollection<CalendarListItemViewModel> OtherClasses { get; } = [];
 
     [ObservableProperty]
     private bool _isBusy;
@@ -77,13 +80,14 @@ public partial class CalendarViewModel : ViewModelBase
         }
     }
 
-    private void PlaceItems(System.Collections.Generic.List<Models.CalendarItemDto> items)
+    private void PlaceItems(List<CalendarItemDto> items)
     {
         GridCells.Where(c => c.Kind is "class_session" or "college_event-grid").ToList()
             .ForEach(c => GridCells.Remove(c));
         Todos.Clear();
         CustomEntries.Clear();
         OtherEvents.Clear();
+        OtherClasses.Clear();
 
         var monday = ThisWeekMonday();
         var weekEnd = monday.AddDays(7);
@@ -119,6 +123,12 @@ public partial class CalendarViewModel : ViewModelBase
                     if (classCol is >= 1 and <= 7 && classRow >= 1 && item.Start.Hour <= LastHour)
                     {
                         GridCells.Add(new CalendarCellViewModel(classRow, classCol, "class_session", item.Title, item.Extra));
+                    }
+                    else
+                    {
+                        // Outside the 7am-8pm grid (e.g. a manually-edited slot moved to an
+                        // early/late time) — still show it rather than dropping it silently.
+                        OtherClasses.Add(new CalendarListItemViewModel(item.Title, item.Start, item.Extra));
                     }
                     break;
             }
