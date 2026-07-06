@@ -33,6 +33,24 @@ def test_ais_01_strips_www_prefix_when_grouping_by_domain():
     assert "1 site(s)" in summary
     assert "example.com (2 visits)" in summary
 
+def test_ais_01_domain_grouping_is_case_insensitive():
+    visits = [
+        {"url": "https://DOCS.example.com/a", "visited_at": datetime(2026, 7, 1, tzinfo=timezone.utc), "duration_seconds": None},
+        {"url": "https://docs.example.com/b", "visited_at": datetime(2026, 7, 2, tzinfo=timezone.utc), "duration_seconds": None},
+    ]
+    summary = generate_browsing_summary(visits)
+    assert "1 site(s)" in summary
+    assert "docs.example.com (2 visits)" in summary
+
+def test_ais_01_groups_schemeless_urls_by_domain():
+    visits = [
+        {"url": "example.com/a", "visited_at": datetime(2026, 7, 1, tzinfo=timezone.utc), "duration_seconds": None},
+        {"url": "example.com/b", "visited_at": datetime(2026, 7, 2, tzinfo=timezone.utc), "duration_seconds": None},
+    ]
+    summary = generate_browsing_summary(visits)
+    assert "1 site(s)" in summary
+    assert "example.com (2 visits)" in summary
+
 def test_ais_01_most_visited_domain_ranks_first():
     visits = (
         [{"url": "https://frequent.example/x", "visited_at": datetime(2026, 7, 1, tzinfo=timezone.utc), "duration_seconds": None}] * 5
