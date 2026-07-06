@@ -4,5 +4,5 @@ namespace BackendApi.Services;
 
 public interface IJwtTokenService
 {
-    string IssueToken(User user, Guid sessionId);
+    string IssueToken(User user, Guid sessionId, Guid? wardStudentId = null);
 }
