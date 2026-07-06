@@ -119,7 +119,12 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
 
         if (material.SubjectId is not null)
         {
-            var teachesSubject = await db.TimetableSlots
+            // Check the subject's own assigned teacher directly, not just TimetableSlots —
+            // a newly assigned subject teacher has no timetable slot yet until scheduling
+            // runs, but should still be able to view their own subject's material.
+            var isSubjectTeacher = await db.Subjects
+                .AnyAsync(s => s.Id == material.SubjectId && s.TeacherId == caller.Id);
+            var teachesSubject = isSubjectTeacher || await db.TimetableSlots
                 .AnyAsync(t => t.SubjectId == material.SubjectId && t.TeacherId == caller.Id);
             if (teachesSubject)
             {
