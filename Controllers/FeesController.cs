@@ -33,16 +33,23 @@ public class FeesController(AppDbContext db) : ControllerBase
             return Forbid();
         }
 
-        if (fee.Status == FeeStatus.Paid)
+        var gatewayTxnId = $"sim_{Guid.NewGuid():N}";
+        var processedAt = DateTime.UtcNow;
+
+        // Atomic conditional update closes the check-then-act race between concurrent pay
+        // requests for the same fee — only the request that actually flips the status runs
+        // the state transition; a losing concurrent request sees rowsUpdated == 0.
+        var rowsUpdated = await db.FeeRecords
+            .Where(f => f.Id == id && f.Status != FeeStatus.Paid)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(f => f.Status, FeeStatus.Paid)
+                .SetProperty(f => f.PaidAt, processedAt));
+
+        if (rowsUpdated == 0)
         {
             return Conflict(new { error = "already_paid", message = "This fee has already been paid." });
         }
 
-        var gatewayTxnId = $"sim_{Guid.NewGuid():N}";
-        var processedAt = DateTime.UtcNow;
-
-        fee.Status = FeeStatus.Paid;
-        fee.PaidAt = processedAt;
         db.PaymentTransactions.Add(new PaymentTransaction
         {
             Id = Guid.NewGuid(),
@@ -53,7 +60,7 @@ public class FeesController(AppDbContext db) : ControllerBase
         });
         await db.SaveChangesAsync();
 
-        return Ok(new PayFeeResponse(fee.Id, fee.Status.ToString(), processedAt, gatewayTxnId));
+        return Ok(new PayFeeResponse(fee.Id, FeeStatus.Paid.ToString(), processedAt, gatewayTxnId));
     }
 
     // PRT-02
