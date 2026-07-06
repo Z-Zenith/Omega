@@ -116,6 +116,25 @@ public class BrowsingControllerTests
         Assert.IsType<ConflictObjectResult>(result.Result);
     }
 
+    // SDA-04: host casing and a bare trailing slash must not let the same site dodge the
+    // already-whitelisted check by being tracked as a different URL string.
+    [Theory]
+    [InlineData("https://Already.Example")]
+    [InlineData("https://already.example/")]
+    public async Task Sda04_RequestWhitelist_ReturnsConflict_ForCaseOrTrailingSlashVariantOfWhitelistedUrl(string variantUrl)
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        db.WhitelistSites.Add(new WhitelistSite { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Url = "https://already.example", ApprovedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.RequestWhitelist(new CreateWhitelistRequestRequest(variantUrl));
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
     // SDA-04
     [Fact]
     public async Task Sda04_RequestWhitelist_IsIdempotent_ReturnsExistingPendingRequestForSameCollegeAndUrl()
@@ -198,8 +217,8 @@ public class BrowsingControllerTests
     public async Task Sda04_ApproveWhitelistRequest_CreatesSiteForRequestersCollege_AndMarksApproved()
     {
         await using var db = NewDb();
-        var teacher = NewUser(AccountType.Teacher);
         var requester = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher, requester.CollegeId);
         db.Users.AddRange(teacher, requester);
         var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://approve-me.example", RequestedBy = requester.Id, Status = WhitelistRequestStatus.Pending };
         db.WhitelistRequests.Add(request);
@@ -225,8 +244,8 @@ public class BrowsingControllerTests
     public async Task Sda04_ApproveWhitelistRequest_ReturnsConflict_WhenAlreadyReviewed()
     {
         await using var db = NewDb();
-        var teacher = NewUser(AccountType.Teacher);
         var requester = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher, requester.CollegeId);
         db.Users.AddRange(teacher, requester);
         var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://x.example", RequestedBy = requester.Id, Status = WhitelistRequestStatus.Approved, ReviewedBy = teacher.Id };
         db.WhitelistRequests.Add(request);
@@ -236,6 +255,27 @@ public class BrowsingControllerTests
         var result = await controller.ApproveWhitelistRequest(request.Id);
 
         Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    // SDA-04: a reviewer must not be able to approve — or even detect the existence of —
+    // a pending request submitted by a student in a different college.
+    [Fact]
+    public async Task Sda04_ApproveWhitelistRequest_ReturnsNotFound_ForRequestFromAnotherCollege()
+    {
+        await using var db = NewDb();
+        var requester = NewUser(AccountType.Student);
+        var otherCollegeTeacher = NewUser(AccountType.Teacher);
+        db.Users.AddRange(requester, otherCollegeTeacher);
+        var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://cross-college.example", RequestedBy = requester.Id, Status = WhitelistRequestStatus.Pending };
+        db.WhitelistRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherCollegeTeacher);
+        var result = await controller.ApproveWhitelistRequest(request.Id);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+        var reloaded = await db.WhitelistRequests.FindAsync(request.Id);
+        Assert.Equal(WhitelistRequestStatus.Pending, reloaded!.Status);
     }
 
     // SDA-04
@@ -259,8 +299,8 @@ public class BrowsingControllerTests
     public async Task Sda04_ApproveWhitelistRequest_DoesNotDuplicateSite_WhenAlreadyApprovedByAnotherRequest()
     {
         await using var db = NewDb();
-        var teacher = NewUser(AccountType.Teacher);
         var requesterA = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher, requesterA.CollegeId);
         var requesterB = NewUser(AccountType.Student, requesterA.CollegeId);
         db.Users.AddRange(teacher, requesterA, requesterB);
         db.WhitelistSites.Add(new WhitelistSite { Id = Guid.NewGuid(), CollegeId = requesterA.CollegeId, Url = "https://shared.example", ApprovedAt = DateTime.UtcNow });

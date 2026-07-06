@@ -120,7 +120,10 @@ public class BrowsingController(AppDbContext db) : ControllerBase
         var whitelistRequest = await db.WhitelistRequests
             .Include(r => r.RequestedByNavigation)
             .FirstOrDefaultAsync(r => r.Id == id);
-        if (whitelistRequest is null)
+        // Same college-scoping as ListPendingRequests: a request from another college is
+        // treated as not found rather than Forbidden, so this reviewer can't act on it or
+        // even confirm it exists — matching the queue they're allowed to see.
+        if (whitelistRequest is null || whitelistRequest.RequestedByNavigation.CollegeId != reviewer.CollegeId)
         {
             return NotFound();
         }
@@ -135,7 +138,8 @@ public class BrowsingController(AppDbContext db) : ControllerBase
         var requesterCollegeId = whitelistRequest.RequestedByNavigation.CollegeId;
         var site = await db.WhitelistSites
             .FirstOrDefaultAsync(s => s.CollegeId == requesterCollegeId && s.Url == whitelistRequest.Url);
-        if (site is null)
+        var isNewSite = site is null;
+        if (isNewSite)
         {
             site = new WhitelistSite
             {
@@ -147,12 +151,25 @@ public class BrowsingController(AppDbContext db) : ControllerBase
             db.WhitelistSites.Add(site);
         }
 
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException) when (isNewSite)
+        {
+            // Two pending requests for the same (college, url) approved concurrently: the
+            // other one won the unique-index race and created the site first. Drop our
+            // speculative insert, reuse the one that now exists, and retry so this
+            // request's own status update still persists.
+            db.Entry(site!).State = EntityState.Detached;
+            site = await db.WhitelistSites.SingleAsync(s => s.CollegeId == requesterCollegeId && s.Url == whitelistRequest.Url);
+            await db.SaveChangesAsync();
+        }
 
         return Ok(new ApproveWhitelistRequestResponse(
             whitelistRequest.Id,
             whitelistRequest.Status.ToString(),
-            new WhitelistSiteDto(site.Id, site.Url, site.ApprovedAt)));
+            new WhitelistSiteDto(site!.Id, site.Url, site.ApprovedAt)));
     }
 
     [HttpGet("students/{id}/browsing-summary")]
@@ -169,10 +186,25 @@ public class BrowsingController(AppDbContext db) : ControllerBase
 
     private static bool TryNormalizeUrl(string url, out string normalized)
     {
-        normalized = url?.Trim() ?? "";
-        return normalized.Length > 0
-            && Uri.TryCreate(normalized, UriKind.Absolute, out var uri)
-            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+        normalized = "";
+        var trimmed = url?.Trim() ?? "";
+        if (trimmed.Length == 0 || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+        {
+            return false;
+        }
+
+        // Host is case-insensitive per RFC 3986 but Uri doesn't lowercase it for us, and a
+        // bare root path is equivalent to no path — without normalizing both, the same site
+        // in different casing/trailing-slash form would dodge the already_whitelisted and
+        // duplicate-pending-request checks below.
+        var path = uri.AbsolutePath == "/" ? "" : uri.AbsolutePath;
+        var port = uri.IsDefaultPort ? "" : $":{uri.Port}";
+        normalized = $"{uri.Scheme}://{uri.Host.ToLowerInvariant()}{port}{path}{uri.Query}";
+        return true;
     }
 
     private async Task<User?> CurrentUserAsync()
