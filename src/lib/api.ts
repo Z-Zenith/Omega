@@ -1,4 +1,5 @@
 const TOKEN_KEY = 'campus.token'
+const WARD_KEY = 'campus.ward'
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -7,6 +8,26 @@ export function getToken(): string | null {
 export function setToken(token: string | null) {
   if (token) localStorage.setItem(TOKEN_KEY, token)
   else localStorage.removeItem(TOKEN_KEY)
+}
+
+export interface StoredWard {
+  wardStudentId: string
+  wardFullName: string
+}
+
+export function getStoredWard(): StoredWard | null {
+  const raw = localStorage.getItem(WARD_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as StoredWard
+  } catch {
+    return null
+  }
+}
+
+export function setStoredWard(ward: StoredWard | null) {
+  if (ward) localStorage.setItem(WARD_KEY, JSON.stringify(ward))
+  else localStorage.removeItem(WARD_KEY)
 }
 
 export class ApiError extends Error {
