@@ -62,6 +62,8 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<Notification> Notifications { get; set; }
 
+    public virtual DbSet<ParentWard> ParentWards { get; set; }
+
     public virtual DbSet<PaymentTransaction> PaymentTransactions { get; set; }
 
     public virtual DbSet<Permission> Permissions { get; set; }
@@ -445,6 +447,18 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.Type).HasColumnType("notification_type");
 
             entity.HasOne(d => d.Recipient).WithMany(p => p.Notifications).HasConstraintName("notifications_recipient_id_fkey");
+        });
+
+        modelBuilder.Entity<ParentWard>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("parent_wards_pkey");
+
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            entity.HasOne(d => d.ParentUser).WithMany(p => p.ParentWardParentUsers).HasConstraintName("parent_wards_parent_user_id_fkey");
+
+            entity.HasOne(d => d.Student).WithMany(p => p.ParentWardStudents).HasConstraintName("parent_wards_student_id_fkey");
         });
 
         modelBuilder.Entity<PaymentTransaction>(entity =>
