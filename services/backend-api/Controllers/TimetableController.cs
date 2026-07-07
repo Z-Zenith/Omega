@@ -222,6 +222,32 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         return Ok(new ChangeRequestDto(changeRequest.Id, changeRequest.Description, changeRequest.Status, changeRequest.RequestedAt));
     }
 
+    // TWA-08 — roster for the attendance-marking form; scoped the same way as marking
+    // itself, so a teacher can only see the section they're assigned to teach this slot.
+    [HttpGet("timetable/slots/{id}/roster")]
+    public async Task<ActionResult<List<RosterStudentDto>>> Roster(Guid id)
+    {
+        var userId = CurrentUserId();
+
+        var slot = await db.TimetableSlots.FirstOrDefaultAsync(s => s.Id == id);
+        if (slot is null)
+        {
+            return NotFound();
+        }
+        if (slot.TeacherId != userId)
+        {
+            return Forbid();
+        }
+
+        var students = await db.SectionEnrollments
+            .Where(e => e.SectionId == slot.SectionId)
+            .Include(e => e.Student)
+            .OrderBy(e => e.Student.FullName)
+            .Select(e => new RosterStudentDto(e.StudentId, e.Student.FullName))
+            .ToListAsync();
+        return Ok(students);
+    }
+
     // TWA-12 — a teacher rates a section they've taught. Written in the exact shape
     // Generate() above reads for AWA-02 (feedback-based teacher exclusion): one row
     // per submission in section_feedback, keyed by (teacher_id, section_id, rating).
@@ -270,7 +296,127 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
 
     // TWA-08
     [HttpPost("attendance")]
-    public IActionResult MarkAttendance() => StatusCode(501, new { feature = "TWA-08", status = "not_implemented" });
+    public async Task<ActionResult<MarkAttendanceResponse>> MarkAttendance(MarkAttendanceRequest request)
+    {
+        var userId = CurrentUserId();
+
+        var caller = await db.Users.FindAsync(userId);
+        if (caller is null || caller.AccountType != AccountType.Teacher)
+        {
+            return Forbid();
+        }
+
+        var slot = await db.TimetableSlots.FirstOrDefaultAsync(s => s.Id == request.TimetableSlotId);
+        if (slot is null)
+        {
+            return NotFound();
+        }
+
+        // Scoped to the teacher's own assigned section: only the teacher timetabled for
+        // this slot may mark attendance for its sessions.
+        if (slot.TeacherId != userId)
+        {
+            return Forbid();
+        }
+
+        var sessionDate = request.SessionDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var session = await db.ClassSessions
+            .FirstOrDefaultAsync(s => s.TimetableSlotId == slot.Id && s.SessionDate == sessionDate);
+        if (session is null)
+        {
+            session = new ClassSession
+            {
+                Id = Guid.NewGuid(),
+                TimetableSlotId = slot.Id,
+                SessionDate = sessionDate,
+                ActualTeacherId = userId,
+            };
+            db.ClassSessions.Add(session);
+        }
+
+        var sectionId = slot.SectionId;
+        var enrolledStudentIds = await db.SectionEnrollments
+            .Where(e => e.SectionId == sectionId)
+            .Select(e => e.StudentId)
+            .ToListAsync();
+        if (enrolledStudentIds.Count == 0)
+        {
+            return BadRequest(new { error = "no_enrolled_students", message = "This section has no enrolled students." });
+        }
+
+        var entries = request.Entries ?? [];
+        var providedIds = entries.Select(e => e.StudentId).ToList();
+        if (providedIds.Count != providedIds.Distinct().Count())
+        {
+            return BadRequest(new { error = "duplicate_student", message = "Each student may only have one attendance entry." });
+        }
+
+        var enrolledSet = enrolledStudentIds.ToHashSet();
+        var unknown = providedIds.Where(id => !enrolledSet.Contains(id)).ToList();
+        if (unknown.Count > 0)
+        {
+            return BadRequest(new { error = "unknown_student", message = "One or more students are not enrolled in this section.", studentIds = unknown });
+        }
+
+        // AC: every enrolled student must have a status set after marking completes.
+        var providedSet = providedIds.ToHashSet();
+        var missing = enrolledStudentIds.Where(id => !providedSet.Contains(id)).ToList();
+        if (missing.Count > 0)
+        {
+            return BadRequest(new { error = "incomplete_attendance", message = "Every enrolled student must have an attendance status.", studentIds = missing });
+        }
+
+        var statusByStudent = new Dictionary<Guid, AttendanceStatus>();
+        foreach (var entry in entries)
+        {
+            if (!Enum.TryParse<AttendanceStatus>(entry.Status, ignoreCase: true, out var status))
+            {
+                return BadRequest(new { error = "invalid_status", message = $"'{entry.Status}' is not a valid attendance status." });
+            }
+            statusByStudent[entry.StudentId] = status;
+        }
+
+        var existingRecords = await db.AttendanceRecords
+            .Where(r => r.ClassSessionId == session.Id)
+            .ToListAsync();
+        var existingByStudent = existingRecords.ToDictionary(r => r.StudentId);
+
+        var now = DateTime.UtcNow;
+        foreach (var (studentId, status) in statusByStudent)
+        {
+            if (existingByStudent.TryGetValue(studentId, out var record))
+            {
+                record.Status = status;
+                record.MarkedAt = now;
+                record.MarkedBy = userId;
+            }
+            else
+            {
+                db.AttendanceRecords.Add(new AttendanceRecord
+                {
+                    Id = Guid.NewGuid(),
+                    ClassSessionId = session.Id,
+                    StudentId = studentId,
+                    Status = status,
+                    MarkedAt = now,
+                    MarkedBy = userId,
+                });
+            }
+        }
+
+        await db.SaveChangesAsync();
+
+        var studentNames = await db.Users
+            .Where(u => enrolledSet.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var records = statusByStudent
+            .Select(kv => new MarkedAttendanceDto(kv.Key, studentNames.GetValueOrDefault(kv.Key, ""), kv.Value.ToString()))
+            .OrderBy(r => r.StudentName)
+            .ToList();
+
+        return Ok(new MarkAttendanceResponse(session.Id, session.SessionDate, sectionId, records));
+    }
 
     // TWA-09
     [HttpGet("attendance/alerts")]
