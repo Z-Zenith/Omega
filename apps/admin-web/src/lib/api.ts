@@ -122,4 +122,25 @@ export function createEvent(event: {
   })
 }
 
+export interface UserProfileDto {
+  id: string
+  fullName: string
+  identifier: string
+  accountType: string
+  collegeId: string
+  departmentId: string | null
+  isActive: boolean
+}
+
+export function getUserProfile(id: string) {
+  return request<UserProfileDto>(`/users/${id}/profile`)
+}
+
+export function resetUserPassword(id: string, newPassword: string) {
+  return request<void>(`/users/${id}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify(newPassword),
+  })
+}
+
 export { ApiError }
