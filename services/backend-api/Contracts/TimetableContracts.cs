@@ -21,3 +21,8 @@ public record PatchSlotRequest(Guid? TeacherId, int? DayOfWeek, TimeOnly? StartT
 public record CreateChangeRequestRequest(string Description);
 
 public record ChangeRequestDto(Guid Id, string Description, string Status, DateTime RequestedAt);
+
+// TWA-12
+public record SubmitSectionFeedbackRequest(int Rating, string? Comments);
+
+public record SectionFeedbackDto(Guid Id, Guid SectionId, string SectionName, int Rating, string? Comments, DateTime SubmittedAt);
