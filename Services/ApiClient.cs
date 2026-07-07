@@ -56,6 +56,14 @@ public class ApiClient
         await SendAsync(HttpMethod.Post, $"/api/v1/events/{eventId}/register");
     }
 
+    // SDA-23: self-service password change requires a fresh, successful TOTP challenge —
+    // the backend rejects the request outright if the code is missing or invalid.
+    public async Task ChangePasswordAsync(string currentPassword, string newPassword, string totpCode)
+    {
+        await SendAsync(HttpMethod.Post, "/api/v1/auth/change-password",
+            new ChangePasswordRequest(currentPassword, newPassword, totpCode));
+    }
+
     public async Task<MyMarksResponse> GetMyMarksAsync()
     {
         var response = await SendAsync(HttpMethod.Get, "/api/v1/marks/mine");
