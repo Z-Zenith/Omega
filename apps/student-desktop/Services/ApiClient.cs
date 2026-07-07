@@ -56,6 +56,13 @@ public class ApiClient
         await SendAsync(HttpMethod.Post, $"/api/v1/events/{eventId}/register");
     }
 
+    public async Task<MyMarksResponse> GetMyMarksAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/marks/mine");
+        return await response.Content.ReadFromJsonAsync<MyMarksResponse>(JsonOptions)
+            ?? new MyMarksResponse([], []);
+    }
+
     public async Task LogoutAsync()
     {
         if (Token is null)

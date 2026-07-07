@@ -12,3 +12,10 @@ public record CalendarItemDto(string Kind, Guid Id, string Title, DateTime Start
 public record MyCalendarResponse(List<CalendarItemDto> Items);
 
 public record EventDto(Guid Id, string Title, DateTime StartTime, DateTime EndTime, bool IsRegistered);
+
+// SDA-15
+public record InternalMarkDto(Guid SubjectId, string SubjectName, decimal Marks, DateTime? PublishedAt);
+
+public record ExternalMarkDto(Guid SubjectId, string SubjectName, string Grade, DateTime? ApprovedAt);
+
+public record MyMarksResponse(List<InternalMarkDto> InternalMarks, List<ExternalMarkDto> ExternalMarks);
