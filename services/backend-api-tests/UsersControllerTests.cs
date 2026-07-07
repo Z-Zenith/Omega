@@ -42,6 +42,16 @@ public class UsersControllerTests
         CreatedAt = DateTime.UtcNow,
     };
 
+    private static PermissionGrant GrantViewAllStudentPerformance(Guid userId) => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = userId,
+        PermissionCode = "view_all_student_performance",
+        Granted = true,
+        GrantedBy = Guid.NewGuid(),
+        CreatedAt = DateTime.UtcNow,
+    };
+
     private static UsersController ControllerAs(AppDbContext db, User user) => new(
         db,
         new FakePasswordHasher(),
@@ -310,5 +320,166 @@ public class UsersControllerTests
         var result = await controller.GetProfile(Guid.NewGuid());
 
         Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    // AWA-08: view_all_student_performance alone is sufficient to view the student at
+    // all (not Forbidden) — the endpoint's AWA-07 sections are gated separately, see
+    // Awa08_GetProfile_PerformanceOnlyPermission_DoesNotUnlockAwa07Data.
+    [Fact]
+    public async Task Awa08_GetProfile_AllowsViewByPerformancePermissionAlone()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student, admin.CollegeId);
+        db.Users.AddRange(admin, student);
+        db.PermissionGrants.Add(GrantViewAllStudentPerformance(admin.Id));
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.GetProfile(student.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<Contracts.StudentRecordDto>(ok.Value);
+        Assert.Equal(student.Id, dto.Id);
+    }
+
+    // AWA-08: published-only filter — same rule SDA-15 enforces on Mine(). An
+    // unpublished mark is invisible to the student, so it must be invisible to
+    // Admin too; otherwise Admin would see data the student cannot see themselves.
+    [Fact]
+    public async Task Awa08_GetProfile_ReturnsOnlyPublishedMarks()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student, admin.CollegeId);
+        var subject = new Subject
+        {
+            Id = Guid.NewGuid(),
+            DepartmentId = Guid.NewGuid(),
+            Code = $"SUB-{Guid.NewGuid():N}"[..8],
+            Name = "Mathematics",
+        };
+        db.Users.AddRange(admin, student);
+        db.Subjects.Add(subject);
+        db.PermissionGrants.Add(GrantViewAllStudentPerformance(admin.Id));
+        db.InternalMarks.AddRange(
+            new InternalMark { Id = Guid.NewGuid(), StudentId = student.Id, SubjectId = subject.Id, Marks = 90, Published = true, PublishedAt = DateTime.UtcNow },
+            new InternalMark { Id = Guid.NewGuid(), StudentId = student.Id, SubjectId = subject.Id, Marks = 40, Published = false });
+        db.ExternalMarks.Add(new ExternalMark
+        {
+            Id = Guid.NewGuid(),
+            StudentId = student.Id,
+            SubjectId = subject.Id,
+            Grade = "A",
+            Published = true,
+            ApprovedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.GetProfile(student.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<Contracts.StudentRecordDto>(ok.Value);
+        var published = Assert.Single(dto.InternalMarks);
+        Assert.Equal(90, published.Marks);
+        Assert.Equal("Mathematics", published.SubjectName);
+        var external = Assert.Single(dto.ExternalMarks);
+        Assert.Equal("A", external.Grade);
+    }
+
+    // AWA-07/AWA-08: the two permissions are gated independently, not ORed into one
+    // blanket gate — a caller with ONLY view_all_student_performance (e.g. a registrar
+    // granted marks-only access via AWA-13) must see marks but NOT the more sensitive
+    // AWA-07 data (remarks, browsing summaries, suspicious flags).
+    [Fact]
+    public async Task Awa08_GetProfile_PerformanceOnlyPermission_DoesNotUnlockAwa07Data()
+    {
+        await using var db = NewDb();
+        var registrar = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student, registrar.CollegeId);
+        db.Users.AddRange(registrar, student);
+        db.PermissionGrants.Add(GrantViewAllStudentPerformance(registrar.Id));
+        db.TeacherReports.Add(new TeacherReport
+        {
+            Id = Guid.NewGuid(),
+            TeacherId = registrar.Id,
+            StudentId = student.Id,
+            Content = "Confidential disciplinary note.",
+            SubmittedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, registrar);
+        var result = await controller.GetProfile(student.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<Contracts.StudentRecordDto>(ok.Value);
+        Assert.Empty(dto.Remarks);
+    }
+
+    // AWA-07/AWA-08: the reverse of the above — view_all_student_records alone doesn't
+    // unlock marks.
+    [Fact]
+    public async Task Awa07_GetProfile_RecordsOnlyPermission_DoesNotUnlockAwa08Marks()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student, admin.CollegeId);
+        var subject = new Subject
+        {
+            Id = Guid.NewGuid(),
+            DepartmentId = Guid.NewGuid(),
+            Code = $"SUB-{Guid.NewGuid():N}"[..8],
+            Name = "Mathematics",
+        };
+        db.Users.AddRange(admin, student);
+        db.Subjects.Add(subject);
+        db.PermissionGrants.Add(GrantViewAllStudentRecords(admin.Id));
+        db.InternalMarks.Add(new InternalMark { Id = Guid.NewGuid(), StudentId = student.Id, SubjectId = subject.Id, Marks = 90, Published = true, PublishedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.GetProfile(student.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<Contracts.StudentRecordDto>(ok.Value);
+        Assert.Empty(dto.InternalMarks);
+    }
+
+    // AWA-08: same scope rules as AWA-07 — student target only, same college only.
+    // AWA-08's "matches what the student sees" rule also lives in the next test, which
+    // uses Sda15_Mine's fixture so the parity assertion is direct rather than inferred.
+    [Fact]
+    public async Task Awa08_GetProfile_ForbidsViewingAnotherStudent_WithoutAnyPermission()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var student = NewUser(AccountType.Student, teacher.CollegeId);
+        db.Users.AddRange(teacher, student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.GetProfile(student.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    // AWA-08: the cross-college isolation, exercised against the AWA-08 permission
+    // specifically (AWA-07 already has its own equivalent test).
+    [Fact]
+    public async Task Awa08_GetProfile_ForbidsStudentFromAnotherCollege_EvenWithPermission()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var otherCollegeStudent = NewUser(AccountType.Student);
+        db.Users.AddRange(admin, otherCollegeStudent);
+        db.PermissionGrants.Add(GrantViewAllStudentPerformance(admin.Id));
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.GetProfile(otherCollegeStudent.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
     }
 }
