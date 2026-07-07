@@ -122,4 +122,85 @@ export function createEvent(event: {
   })
 }
 
+export interface RoleBindingDto {
+  id: string
+  userId: string
+  userFullName: string
+  roleCode: string
+  scopeType: 'Global' | 'Department'
+  departmentId: string | null
+  grantedAt: string
+}
+
+export function listRoleBindings() {
+  return request<RoleBindingDto[]>('/role-bindings')
+}
+
+export function createRoleBinding(binding: {
+  userId: string
+  roleCode: string
+  scopeType: 'Global' | 'Department'
+  departmentId: string | null
+}) {
+  return request<RoleBindingDto>('/role-bindings', {
+    method: 'POST',
+    body: JSON.stringify(binding),
+  })
+}
+
+export interface PermissionGrantDto {
+  id: string
+  userId: string
+  userFullName: string
+  permissionCode: string
+  granted: boolean
+  expiresAt: string | null
+  grantedBy: string
+  createdAt: string
+}
+
+export function listPermissionGrants() {
+  return request<PermissionGrantDto[]>('/permission-grants')
+}
+
+export function createPermissionGrant(grant: {
+  userId: string
+  permissionCode: string
+  granted: boolean
+  expiresAt: string | null
+}) {
+  return request<PermissionGrantDto>('/permission-grants', {
+    method: 'POST',
+    body: JSON.stringify(grant),
+  })
+}
+
+export function deletePermissionGrant(id: string) {
+  return request<void>(`/permission-grants/${id}`, { method: 'DELETE' })
+}
+
+export type AccountType = 'Student' | 'Teacher'
+
+export interface CreateUserRequest {
+  collegeId: string
+  accountType: AccountType
+  identifier: string
+  initialPassword: string
+  fullName: string
+  departmentId: string | null
+}
+
+export interface CreateUserResponse {
+  userId: string
+  totpProvisioningUri: string
+  totpSecret: string
+}
+
+export function createUser(user: CreateUserRequest) {
+  return request<CreateUserResponse>('/users', {
+    method: 'POST',
+    body: JSON.stringify(user),
+  })
+}
+
 export { ApiError }

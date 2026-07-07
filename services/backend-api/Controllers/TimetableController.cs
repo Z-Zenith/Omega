@@ -222,6 +222,52 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         return Ok(new ChangeRequestDto(changeRequest.Id, changeRequest.Description, changeRequest.Status, changeRequest.RequestedAt));
     }
 
+    // TWA-12 — a teacher rates a section they've taught. Written in the exact shape
+    // Generate() above reads for AWA-02 (feedback-based teacher exclusion): one row
+    // per submission in section_feedback, keyed by (teacher_id, section_id, rating).
+    // No dedicated permission code exists for this in the RBAC catalog (adding one
+    // would be an authz-model change requiring the contract-change sign-off per
+    // CLAUDE.md); instead this endpoint verifies the caller actually has a
+    // TeacherSectionAssignment for the section, which both confirms they're a teacher
+    // and that they taught that specific section.
+    [HttpPost("timetable/sections/{sectionId}/feedback")]
+    public async Task<ActionResult<SectionFeedbackDto>> SubmitSectionFeedback(Guid sectionId, SubmitSectionFeedbackRequest request)
+    {
+        var userId = CurrentUserId();
+
+        if (request.Rating is < 1 or > 5)
+        {
+            return BadRequest(new { error = "rating must be between 1 and 5" });
+        }
+
+        var taughtSection = await db.TeacherSectionAssignments
+            .AnyAsync(a => a.TeacherId == userId && a.SectionId == sectionId);
+        if (!taughtSection)
+        {
+            return Forbid();
+        }
+
+        var section = await db.Sections.FindAsync(sectionId);
+        if (section is null)
+        {
+            return NotFound();
+        }
+
+        var feedback = new SectionFeedback
+        {
+            Id = Guid.NewGuid(),
+            TeacherId = userId,
+            SectionId = sectionId,
+            Rating = request.Rating,
+            Comments = request.Comments,
+            SubmittedAt = DateTime.UtcNow,
+        };
+        db.SectionFeedbacks.Add(feedback);
+        await db.SaveChangesAsync();
+
+        return Ok(new SectionFeedbackDto(feedback.Id, feedback.SectionId, section.Name, feedback.Rating, feedback.Comments, feedback.SubmittedAt));
+    }
+
     // TWA-08
     [HttpPost("attendance")]
     public IActionResult MarkAttendance() => StatusCode(501, new { feature = "TWA-08", status = "not_implemented" });
