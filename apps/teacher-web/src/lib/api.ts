@@ -101,6 +101,22 @@ export function createChangeRequest(description: string) {
   })
 }
 
+export interface SectionFeedbackDto {
+  id: string
+  sectionId: string
+  sectionName: string
+  rating: number
+  comments: string | null
+  submittedAt: string
+}
+
+export function submitSectionFeedback(sectionId: string, rating: number, comments?: string) {
+  return request<SectionFeedbackDto>(`/timetable/sections/${sectionId}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ rating, comments: comments ?? null }),
+  })
+}
+
 export interface EventDto {
   id: string
   title: string
