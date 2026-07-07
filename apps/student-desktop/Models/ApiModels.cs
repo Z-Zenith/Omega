@@ -13,6 +13,8 @@ public record MyCalendarResponse(List<CalendarItemDto> Items);
 
 public record EventDto(Guid Id, string Title, DateTime StartTime, DateTime EndTime, bool IsRegistered);
 
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword, string TotpCode);
+
 // SDA-15
 public record InternalMarkDto(Guid SubjectId, string SubjectName, decimal Marks, DateTime? PublishedAt);
 
