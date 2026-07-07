@@ -179,4 +179,28 @@ export function deletePermissionGrant(id: string) {
   return request<void>(`/permission-grants/${id}`, { method: 'DELETE' })
 }
 
+export type AccountType = 'Student' | 'Teacher'
+
+export interface CreateUserRequest {
+  collegeId: string
+  accountType: AccountType
+  identifier: string
+  initialPassword: string
+  fullName: string
+  departmentId: string | null
+}
+
+export interface CreateUserResponse {
+  userId: string
+  totpProvisioningUri: string
+  totpSecret: string
+}
+
+export function createUser(user: CreateUserRequest) {
+  return request<CreateUserResponse>('/users', {
+    method: 'POST',
+    body: JSON.stringify(user),
+  })
+}
+
 export { ApiError }

@@ -6,6 +6,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
 import { RolesPage } from '@/pages/RolesPage'
+import { CreateAccountPage } from '@/pages/CreateAccountPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -43,6 +44,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/timetable">Timetable</Link>
           <Link to="/events">Events</Link>
           {canManageRoles && <Link to="/roles">Roles & Permissions</Link>}
+          <Link to="/accounts/new">Create account</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>{fullName}</span>
@@ -90,6 +92,16 @@ function App() {
                   <RolesPage />
                 </Shell>
               </RequireRoleManagement>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/accounts/new"
+          element={
+            <RequireAuth>
+              <Shell>
+                <CreateAccountPage />
+              </Shell>
             </RequireAuth>
           }
         />
