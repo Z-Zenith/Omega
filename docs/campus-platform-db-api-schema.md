@@ -374,6 +374,7 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | Method | Path | Feature |
 |---|---|---|
 | POST | `/groups` | TWA-05, AWA-12 |
+| GET | `/groups` | AWA-06 |
 | GET | `/groups/mine` | SDA-16 |
 | POST | `/groups/{id}/posts` | SDA-16 |
 | POST | `/materials` | TWA-06 |

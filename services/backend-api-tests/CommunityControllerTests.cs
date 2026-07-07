@@ -44,6 +44,18 @@ public class CommunityControllerTests
         CreatedAt = DateTime.UtcNow,
     };
 
+    // Mirrors PermissionService's actual resolution, as a direct grant so tests don't need
+    // to seed roles/role-bindings just to exercise the controller's permission check.
+    private static PermissionGrant GrantViewAllGroups(Guid userId) => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = userId,
+        PermissionCode = "view_all_groups",
+        Granted = true,
+        GrantedBy = Guid.NewGuid(),
+        CreatedAt = DateTime.UtcNow,
+    };
+
     private static CommunityController ControllerAs(AppDbContext db, User user)
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -223,5 +235,68 @@ public class CommunityControllerTests
         Assert.Equal("First post!", dto.Content);
         Assert.Equal(student.Id, dto.AuthorId);
         Assert.Single(await db.GroupPosts.Where(p => p.GroupId == group.Id).ToListAsync());
+    }
+
+    // AWA-06
+    [Fact]
+    public async Task Awa06_AllGroups_ForbidsUsersWithoutViewAllGroupsPermission()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.AllGroups();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    // AWA-06: acceptance-critical — "no group is excluded from Admin's view regardless of
+    // who created it". Covers a group the admin never joined and one created by someone else.
+    [Fact]
+    public async Task Awa06_AllGroups_ReturnsEveryGroupInCollege_RegardlessOfCreatorOrMembership()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var teacher = NewUser(AccountType.Teacher, admin.CollegeId);
+        db.Users.AddRange(admin, teacher);
+        db.PermissionGrants.Add(GrantViewAllGroups(admin.Id));
+        var teacherCreated = new Group { Id = Guid.NewGuid(), CollegeId = admin.CollegeId, Name = "Chess Club", Type = GroupType.Club, CreatedBy = teacher.Id };
+        var autoProvisioned = new Group { Id = Guid.NewGuid(), CollegeId = admin.CollegeId, Name = "CSE-2A", Type = GroupType.Class, CreatedBy = null };
+        db.Groups.AddRange(teacherCreated, autoProvisioned);
+        // Admin is not a member of either group — membership must not gate this endpoint.
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.AllGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<AllGroupsResponse>(ok.Value);
+        Assert.Equal(2, response.Groups.Count);
+        Assert.Contains(response.Groups, g => g.Id == teacherCreated.Id && g.CreatedBy == teacher.Id);
+        Assert.Contains(response.Groups, g => g.Id == autoProvisioned.Id && g.CreatedBy == null);
+    }
+
+    // AWA-06: groups are college-tenant data — another college's groups must not leak in.
+    [Fact]
+    public async Task Awa06_AllGroups_ExcludesGroupsFromOtherColleges()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        db.Users.Add(admin);
+        db.PermissionGrants.Add(GrantViewAllGroups(admin.Id));
+        var ownCollegeGroup = new Group { Id = Guid.NewGuid(), CollegeId = admin.CollegeId, Name = "Ours", Type = GroupType.Club };
+        var otherCollegeGroup = new Group { Id = Guid.NewGuid(), CollegeId = Guid.NewGuid(), Name = "Theirs", Type = GroupType.Club };
+        db.Groups.AddRange(ownCollegeGroup, otherCollegeGroup);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.AllGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<AllGroupsResponse>(ok.Value);
+        Assert.Single(response.Groups);
+        Assert.Equal("Ours", response.Groups[0].Name);
     }
 }

@@ -8,6 +8,12 @@ public record GroupDto(Guid Id, string Name, string Type, Guid? SectionId);
 
 public record MyGroupsResponse(List<GroupDto> Groups);
 
+// AWA-06 — includes CreatedBy so Admin can see who created each group; the
+// member-facing GroupDto deliberately omits it (not needed there).
+public record AdminGroupDto(Guid Id, string Name, string Type, Guid? SectionId, Guid? CreatedBy);
+
+public record AllGroupsResponse(List<AdminGroupDto> Groups);
+
 public record CreatePostRequest(string Content);
 
 public record GroupPostDto(Guid Id, Guid GroupId, Guid AuthorId, string Content, DateTime CreatedAt);

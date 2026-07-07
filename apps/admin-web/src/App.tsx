@@ -1,12 +1,13 @@
 import { Navigate, Route, Routes, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from '@/lib/auth'
-import { listRoleBindings } from '@/lib/api'
+import { listRoleBindings, listAllGroups } from '@/lib/api'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
 import { RolesPage } from '@/pages/RolesPage'
 import { CreateAccountPage } from '@/pages/CreateAccountPage'
+import { GroupsPage } from '@/pages/GroupsPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -34,9 +35,29 @@ function RequireRoleManagement({ children }: { children: React.ReactNode }) {
   return children
 }
 
+// AWA-06: same "ask the already permission-gated backend" pattern as useCanManageRoles —
+// the JWT doesn't carry the view_all_groups permission code, so the gate here is a live probe.
+function useCanViewAllGroups() {
+  const { token } = useAuth()
+  const query = useQuery({
+    queryKey: ['groups', 'all'],
+    queryFn: listAllGroups,
+    enabled: !!token,
+    retry: false,
+  })
+  return !query.isError
+}
+
+function RequireGroupsAccess({ children }: { children: React.ReactNode }) {
+  const canViewAllGroups = useCanViewAllGroups()
+  if (!canViewAllGroups) return <Navigate to="/timetable" replace />
+  return children
+}
+
 function Shell({ children }: { children: React.ReactNode }) {
   const { fullName, setSession } = useAuth()
   const canManageRoles = useCanManageRoles()
+  const canViewAllGroups = useCanViewAllGroups()
   return (
     <div className="min-h-svh">
       <nav className="flex items-center justify-between border-b px-8 py-4">
@@ -44,6 +65,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/timetable">Timetable</Link>
           <Link to="/events">Events</Link>
           {canManageRoles && <Link to="/roles">Roles & Permissions</Link>}
+          {canViewAllGroups && <Link to="/groups">Community Groups</Link>}
           <Link to="/accounts/new">Create account</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -102,6 +124,18 @@ function App() {
               <Shell>
                 <CreateAccountPage />
               </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/groups"
+          element={
+            <RequireAuth>
+              <RequireGroupsAccess>
+                <Shell>
+                  <GroupsPage />
+                </Shell>
+              </RequireGroupsAccess>
             </RequireAuth>
           }
         />

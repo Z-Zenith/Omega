@@ -179,6 +179,19 @@ export function deletePermissionGrant(id: string) {
   return request<void>(`/permission-grants/${id}`, { method: 'DELETE' })
 }
 
+// AWA-06
+export interface AdminGroupDto {
+  id: string
+  name: string
+  type: string
+  sectionId: string | null
+  createdBy: string | null
+}
+
+export function listAllGroups() {
+  return request<{ groups: AdminGroupDto[] }>('/groups')
+}
+
 export type AccountType = 'Student' | 'Teacher'
 
 export interface CreateUserRequest {

@@ -87,6 +87,36 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         return Ok(new MyGroupsResponse(groups.Select(ToDto).ToList()));
     }
 
+    // AWA-06: institution-wide view for Admin/HoD/Lecturer — unlike MyGroups, this is not
+    // scoped by membership at all, so a group is visible here regardless of who created it
+    // or whether the caller has ever joined it. Scoped by college (not global) since groups
+    // are college-tenant data, same as CreateGroup's scoping.
+    [HttpGet("groups")]
+    public async Task<ActionResult<AllGroupsResponse>> AllGroups()
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "view_all_groups"))
+        {
+            return Forbid();
+        }
+
+        var caller = await db.Users.FindAsync(userId);
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+
+        // Projected in the query itself (not materialized as full Group entities then
+        // mapped in memory) — an institution-wide listing has no reason to pull every
+        // column over the wire for a DTO that only needs five of them.
+        var groups = await db.Groups
+            .Where(g => g.CollegeId == caller.CollegeId)
+            .Select(g => new AdminGroupDto(g.Id, g.Name, g.Type.ToString(), g.SectionId, g.CreatedBy))
+            .ToListAsync();
+
+        return Ok(new AllGroupsResponse(groups));
+    }
+
     // SDA-16
     [HttpPost("groups/{id}/posts")]
     public async Task<ActionResult<GroupPostDto>> CreatePost(Guid id, CreatePostRequest request)
