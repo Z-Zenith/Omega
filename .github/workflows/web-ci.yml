@@ -1,0 +1,57 @@
+name: Web Apps CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/parent-portal/**"
+      - "apps/teacher-web/**"
+      - "apps/admin-web/**"
+      - ".github/workflows/web-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/parent-portal/**"
+      - "apps/teacher-web/**"
+      - "apps/admin-web/**"
+      - ".github/workflows/web-ci.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [parent-portal, teacher-web, admin-web]
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # teacher-web consumes packages/direct-messaging via a `file:` dependency.
+      # npm doesn't install a file-linked package's own deps (no npm workspaces
+      # here), so without this its react/typescript devDependencies are missing
+      # and `tsc -b` fails to resolve `react` when compiling the linked source.
+      - name: Install shared package dependencies (direct-messaging)
+        if: matrix.app == 'teacher-web'
+        run: npm ci
+        working-directory: packages/direct-messaging
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build

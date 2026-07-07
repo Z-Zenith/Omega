@@ -14,3 +14,17 @@ public record MyCalendarResponse(List<CalendarItemDto> Items);
 public record EventDto(Guid Id, string Title, DateTime StartTime, DateTime EndTime, bool IsRegistered);
 
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword, string TotpCode);
+
+// SDA-15
+public record InternalMarkDto(Guid SubjectId, string SubjectName, decimal Marks, DateTime? PublishedAt);
+
+public record ExternalMarkDto(Guid SubjectId, string SubjectName, string Grade, DateTime? ApprovedAt);
+
+public record MyMarksResponse(List<InternalMarkDto> InternalMarks, List<ExternalMarkDto> ExternalMarks);
+
+// SDA-11: request/response shapes for the auto-submit-on-exit endpoint
+// (POST /api/v1/assignments/{id}/submissions/auto-submit). SubmissionFormat mirrors the
+// backend's AssignmentType enum, serialized as a string (see Program.cs JsonStringEnumConverter).
+public record SubmitAssignmentRequest(string ContentUrl, string SubmissionFormat);
+
+public record SubmissionDto(Guid Id, Guid AssignmentId, Guid StudentId, string ContentUrl, DateTime SubmittedAt, bool IsLate, bool IsAutosubmitted);
