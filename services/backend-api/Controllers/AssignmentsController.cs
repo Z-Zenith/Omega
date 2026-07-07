@@ -79,8 +79,9 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
     }
 
     // SDA-10. SDA-11 (auto-submit on exit) is Track 1 — a different trigger path
-    // (student-desktop exit detection) that would call this same table with
-    // IsAutosubmitted=true, not something this endpoint decides on its own.
+    // (student-desktop exit detection), implemented below in AutoSubmit(). Manual
+    // submissions always leave IsAutosubmitted=false so the teacher's view can tell
+    // the two apart (SDA-11 acceptance criterion).
     [HttpPost("assignments/{id}/submissions")]
     public async Task<ActionResult<SubmissionDto>> Submit(Guid id, SubmitAssignmentRequest request)
     {
@@ -126,6 +127,83 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
             SubmittedAt = submittedAt,
             IsLate = submittedAt > assignment.DueDate,
             IsAutosubmitted = false,
+        };
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        return Ok(ToSubmissionDto(submission));
+    }
+
+    // SDA-11. Called by the student desktop app when it detects app exit or focus loss
+    // while an assignment window is active, to persist the student's current
+    // work-in-progress as an auto-submission. Distinct from Submit() above only in that
+    // it (a) requires the submission window to still be open — this is a background
+    // safety net for an active window, not a way to submit after the fact — and
+    // (b) sets IsAutosubmitted=true so the teacher's view can flag it as such
+    // (acceptance criterion: auto-submitted must be visually/data distinct from manual).
+    [HttpPost("assignments/{id}/submissions/auto-submit")]
+    public async Task<ActionResult<SubmissionDto>> AutoSubmit(Guid id, SubmitAssignmentRequest request)
+    {
+        var userId = CurrentUserId();
+        var student = await db.Users.FindAsync(userId);
+        if (student is null)
+        {
+            return Unauthorized();
+        }
+        if (student.AccountType != AccountType.Student)
+        {
+            return Forbid();
+        }
+
+        var assignment = await db.Assignments.FindAsync(id);
+        if (assignment is null)
+        {
+            return NotFound();
+        }
+
+        var now = DateTime.UtcNow;
+        if (now < assignment.SubmissionWindowStart || now > assignment.SubmissionWindowEnd)
+        {
+            return BadRequest(new
+            {
+                error = "window_inactive",
+                message = "The submission window is not currently open, so this assignment cannot be auto-submitted.",
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ContentUrl))
+        {
+            return BadRequest(new { error = "content_required", message = "Submission content must not be empty." });
+        }
+        if (request.SubmissionFormat != assignment.Type)
+        {
+            return BadRequest(new
+            {
+                error = "format_mismatch",
+                message = $"This assignment requires a {assignment.Type} submission, not {request.SubmissionFormat}.",
+            });
+        }
+
+        // A student who already has a submission for this assignment (manual or a
+        // prior auto-submit) doesn't need another one — exit/focus-loss can fire
+        // repeatedly (e.g. losing focus after already submitting).
+        var alreadySubmitted = await db.Submissions
+            .AnyAsync(s => s.AssignmentId == id && s.StudentId == userId);
+        if (alreadySubmitted)
+        {
+            return Conflict(new { error = "already_submitted", message = "A submission already exists for this assignment." });
+        }
+
+        var submittedAt = now;
+        var submission = new Submission
+        {
+            Id = Guid.NewGuid(),
+            AssignmentId = id,
+            StudentId = userId,
+            ContentUrl = request.ContentUrl.Trim(),
+            SubmittedAt = submittedAt,
+            IsLate = submittedAt > assignment.DueDate,
+            IsAutosubmitted = true,
         };
         db.Submissions.Add(submission);
         await db.SaveChangesAsync();

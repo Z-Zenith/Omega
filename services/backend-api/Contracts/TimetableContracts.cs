@@ -21,3 +21,22 @@ public record PatchSlotRequest(Guid? TeacherId, int? DayOfWeek, TimeOnly? StartT
 public record CreateChangeRequestRequest(string Description);
 
 public record ChangeRequestDto(Guid Id, string Description, string Status, DateTime RequestedAt);
+
+// TWA-08
+public record RosterStudentDto(Guid StudentId, string FullName);
+
+public record AttendanceEntryRequest(Guid StudentId, string Status);
+
+// SessionDate defaults to today (server time) when omitted — covers the common "mark
+// today's session" case. The (TimetableSlotId, SessionDate) pair identifies the session;
+// the underlying ClassSession row is created on first mark if it doesn't exist yet.
+public record MarkAttendanceRequest(Guid TimetableSlotId, DateOnly? SessionDate, List<AttendanceEntryRequest> Entries);
+
+public record MarkedAttendanceDto(Guid StudentId, string StudentName, string Status);
+
+public record MarkAttendanceResponse(Guid ClassSessionId, DateOnly SessionDate, Guid SectionId, List<MarkedAttendanceDto> Records);
+
+// TWA-12
+public record SubmitSectionFeedbackRequest(int Rating, string? Comments);
+
+public record SectionFeedbackDto(Guid Id, Guid SectionId, string SectionName, int Rating, string? Comments, DateTime SubmittedAt);
