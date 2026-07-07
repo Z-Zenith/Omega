@@ -122,4 +122,47 @@ export function createEvent(event: {
   })
 }
 
+export interface InternalMarksRosterEntry {
+  studentId: string
+  studentName: string
+  marks: number | null
+  published: boolean
+  publishedAt: string | null
+}
+
+export function getInternalMarksRoster(subjectId: string, assignmentId?: string) {
+  const params = new URLSearchParams({ subjectId })
+  if (assignmentId) params.set('assignmentId', assignmentId)
+  return request<InternalMarksRosterEntry[]>(`/marks/internal/roster?${params.toString()}`)
+}
+
+export interface InternalMarkRecord {
+  id: string
+  studentId: string
+  subjectId: string
+  assignmentId: string | null
+  marks: number
+  published: boolean
+  publishedAt: string | null
+}
+
+export function submitInternalMark(mark: {
+  studentId: string
+  subjectId: string
+  assignmentId?: string | null
+  marks: number
+  publish?: boolean
+}) {
+  return request<InternalMarkRecord>('/marks/internal', {
+    method: 'POST',
+    body: JSON.stringify({
+      studentId: mark.studentId,
+      subjectId: mark.subjectId,
+      assignmentId: mark.assignmentId ?? null,
+      marks: mark.marks,
+      publish: mark.publish ?? false,
+    }),
+  })
+}
+
 export { ApiError }
