@@ -56,6 +56,16 @@ public class ApiClient
         await SendAsync(HttpMethod.Post, $"/api/v1/events/{eventId}/register");
     }
 
+    // SDA-11: called by AssignmentAutoSubmitService when the app detects exit or
+    // focus-loss during an active assignment window.
+    public async Task<SubmissionDto> AutoSubmitAssignmentAsync(Guid assignmentId, string contentUrl, string submissionFormat)
+    {
+        var response = await SendAsync(HttpMethod.Post, $"/api/v1/assignments/{assignmentId}/submissions/auto-submit",
+            new SubmitAssignmentRequest(contentUrl, submissionFormat));
+        return await response.Content.ReadFromJsonAsync<SubmissionDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty auto-submit response");
+    }
+
     public async Task LogoutAsync()
     {
         if (Token is null)
