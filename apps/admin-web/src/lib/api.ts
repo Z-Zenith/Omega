@@ -122,4 +122,20 @@ export function createEvent(event: {
   })
 }
 
+export interface TeacherReportDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  sectionId: string | null
+  sectionName: string | null
+  studentId: string | null
+  studentName: string | null
+  content: string
+  submittedAt: string
+}
+
+export function getReports() {
+  return request<TeacherReportDto[]>('/reports')
+}
+
 export { ApiError }

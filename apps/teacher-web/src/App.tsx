@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from '@/lib/auth'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { ReportsPage } from '@/pages/ReportsPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -18,6 +19,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="flex gap-6 text-sm font-medium">
           <Link to="/timetable">Timetable</Link>
           <Link to="/events">Events</Link>
+          <Link to="/reports">Report</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>{fullName}</span>
@@ -52,6 +54,16 @@ function App() {
             <RequireAuth>
               <Shell>
                 <EventsPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <RequireAuth>
+              <Shell>
+                <ReportsPage />
               </Shell>
             </RequireAuth>
           }
