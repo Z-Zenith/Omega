@@ -49,7 +49,7 @@ import type {
   ImageSearchProps,
 } from '../src/index.js';
 
-import { LANGUAGE_LABELS } from '../src/index.js';
+import { CodeEditor, LANGUAGE_LABELS, isSupportedLanguage } from '../src/index.js';
 
 // ---- subpath imports also resolve (tree-shaking contract) ----
 import type { CodeEditorProps as CEP } from '../src/code-editor/index.js';
@@ -160,6 +160,13 @@ declare const _notesApi: NotesEditorApi;
 void _codeApi;
 void _viewerApi;
 void _notesApi;
+
+// SEK-01 — CodeEditor and isSupportedLanguage resolve from the barrel (this
+// would fail to compile if code-editor/index.ts's re-export path broke).
+declare const _codeEditorComponent: typeof CodeEditor;
+void _codeEditorComponent;
+const _isPythonSupported: boolean = isSupportedLanguage('python');
+void _isPythonSupported;
 
 // Type-only re-exports compile (this would fail if any barrel or subpath
 // export broke) — one field per symbol instead of a separate alias + void
