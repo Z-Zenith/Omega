@@ -216,4 +216,44 @@ export function createUser(user: CreateUserRequest) {
   })
 }
 
+// AWA-07
+export interface TeacherRemarkDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  content: string
+  submittedAt: string
+}
+
+export interface BrowsingSummaryReportDto {
+  id: string
+  summaryText: string
+  generatedAt: string
+}
+
+export interface SuspiciousFlagReportDto {
+  id: string
+  confidenceScore: number
+  flaggedAt: string
+  assignmentId: string | null
+  classSessionId: string | null
+}
+
+export interface StudentRecordDto {
+  id: string
+  fullName: string
+  identifier: string
+  accountType: string
+  collegeId: string
+  departmentId: string | null
+  isActive: boolean
+  remarks: TeacherRemarkDto[]
+  browsingSummaries: BrowsingSummaryReportDto[]
+  suspiciousFlags: SuspiciousFlagReportDto[]
+}
+
+export function getStudentRecord(userId: string) {
+  return request<StudentRecordDto>(`/users/${userId}/profile`)
+}
+
 export { ApiError }
