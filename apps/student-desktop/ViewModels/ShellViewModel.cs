@@ -7,15 +7,21 @@ using StudentDesktop.Services;
 
 namespace StudentDesktop.ViewModels;
 
-public partial class ShellViewModel : ViewModelBase
+public partial class ShellViewModel : ViewModelBase, IDisposable
 {
     private readonly ApiClient _apiClient;
     private readonly Action _onSignOut;
+    private bool _disposed;
 
     public string FullName { get; }
 
     public CalendarViewModel CalendarViewModel { get; }
     public EventsViewModel EventsViewModel { get; }
+
+    // SDA-01: owned for the lifetime of the signed-in session. Started here so the
+    // class-time lock is active as soon as the student is logged in, and stopped/
+    // disposed on sign-out so no restriction (and no timer) lingers past the session.
+    public ClassLockService ClassLockService { get; }
 
     [ObservableProperty]
     private ViewModelBase _currentPage;
@@ -28,6 +34,9 @@ public partial class ShellViewModel : ViewModelBase
         CalendarViewModel = new CalendarViewModel(apiClient);
         EventsViewModel = new EventsViewModel(apiClient);
         _currentPage = CalendarViewModel;
+
+        ClassLockService = new ClassLockService(apiClient);
+        ClassLockService.Start();
     }
 
     [RelayCommand]
@@ -47,6 +56,17 @@ public partial class ShellViewModel : ViewModelBase
         {
             // Best-effort — the local session is cleared regardless of server-side outcome.
         }
+        Dispose();
         _onSignOut();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+        ClassLockService.Dispose();
     }
 }
