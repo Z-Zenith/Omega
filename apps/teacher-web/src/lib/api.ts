@@ -122,4 +122,29 @@ export function createEvent(event: {
   })
 }
 
+export interface ExternalMarksPermissionStatus {
+  granted: boolean
+  expiresAt: string | null
+}
+
+export function getExternalMarksPermissionStatus() {
+  return request<ExternalMarksPermissionStatus>('/marks/external/permission-status')
+}
+
+export interface ExternalMarkSubmission {
+  id: string
+  studentId: string
+  subjectId: string
+  grade: string
+  status: string
+  submittedAt: string
+}
+
+export function submitExternalMark(mark: { studentId: string; subjectId: string; grade: string }) {
+  return request<ExternalMarkSubmission>('/marks/external', {
+    method: 'POST',
+    body: JSON.stringify(mark),
+  })
+}
+
 export { ApiError }
