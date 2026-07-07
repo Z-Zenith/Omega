@@ -7,6 +7,7 @@ import { EventsPage } from '@/pages/EventsPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
+import { DashboardPage } from '@/pages/DashboardPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -20,6 +21,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-svh">
       <nav className="flex items-center justify-between border-b px-8 py-4">
         <div className="flex gap-6 text-sm font-medium">
+          <Link to="/dashboard">Dashboard</Link>
           <Link to="/timetable">Timetable</Link>
           <Link to="/attendance">Attendance</Link>
           <Link to="/events">Events</Link>
@@ -44,6 +46,16 @@ function App() {
       <ActiveSectionProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <DashboardPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
           <Route
             path="/timetable"
             element={
