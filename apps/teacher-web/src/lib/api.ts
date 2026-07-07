@@ -101,6 +101,41 @@ export function createChangeRequest(description: string) {
   })
 }
 
+export interface RosterStudentDto {
+  studentId: string
+  fullName: string
+}
+
+export function getSectionRoster(timetableSlotId: string) {
+  return request<RosterStudentDto[]>(`/timetable/slots/${timetableSlotId}/roster`)
+}
+
+export type AttendanceStatus = 'Present' | 'Absent' | 'Late'
+
+export interface MarkedAttendanceDto {
+  studentId: string
+  studentName: string
+  status: string
+}
+
+export interface MarkAttendanceResponse {
+  classSessionId: string
+  sessionDate: string
+  sectionId: string
+  records: MarkedAttendanceDto[]
+}
+
+export function markAttendance(
+  timetableSlotId: string,
+  entries: { studentId: string; status: AttendanceStatus }[],
+  sessionDate?: string,
+) {
+  return request<MarkAttendanceResponse>('/attendance', {
+    method: 'POST',
+    body: JSON.stringify({ timetableSlotId, sessionDate: sessionDate ?? null, entries }),
+  })
+}
+
 export interface EventDto {
   id: string
   title: string

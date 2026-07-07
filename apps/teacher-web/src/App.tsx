@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from '@/lib/auth'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { AttendancePage } from '@/pages/AttendancePage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -17,6 +18,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <nav className="flex items-center justify-between border-b px-8 py-4">
         <div className="flex gap-6 text-sm font-medium">
           <Link to="/timetable">Timetable</Link>
+          <Link to="/attendance">Attendance</Link>
           <Link to="/events">Events</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -42,6 +44,16 @@ function App() {
             <RequireAuth>
               <Shell>
                 <TimetablePage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/attendance"
+          element={
+            <RequireAuth>
+              <Shell>
+                <AttendancePage />
               </Shell>
             </RequireAuth>
           }
