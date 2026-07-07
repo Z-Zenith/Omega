@@ -16,6 +16,7 @@ public partial class ShellViewModel : ViewModelBase
 
     public CalendarViewModel CalendarViewModel { get; }
     public EventsViewModel EventsViewModel { get; }
+    public MarksViewModel MarksViewModel { get; }
 
     [ObservableProperty]
     private ViewModelBase _currentPage;
@@ -27,6 +28,7 @@ public partial class ShellViewModel : ViewModelBase
         FullName = fullName;
         CalendarViewModel = new CalendarViewModel(apiClient);
         EventsViewModel = new EventsViewModel(apiClient);
+        MarksViewModel = new MarksViewModel(apiClient);
         _currentPage = CalendarViewModel;
     }
 
@@ -35,6 +37,9 @@ public partial class ShellViewModel : ViewModelBase
 
     [RelayCommand]
     private void ShowEvents() => CurrentPage = EventsViewModel;
+
+    [RelayCommand]
+    private void ShowMarks() => CurrentPage = MarksViewModel;
 
     [RelayCommand]
     private async Task SignOutAsync()
