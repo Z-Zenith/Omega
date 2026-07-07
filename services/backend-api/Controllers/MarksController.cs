@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Services;
@@ -23,9 +24,27 @@ public class MarksController(AppDbContext db) : ControllerBase
     [HttpPost("external/{id}/approve")]
     public IActionResult ApproveExternal(Guid id) => StatusCode(501, new { feature = "TWA-20", status = "not_implemented" });
 
-    // SDA-15
+    // SDA-15 — published marks only, mirrors PRT-02's filtering logic scoped to the logged-in student.
     [HttpGet("mine")]
-    public IActionResult Mine() => StatusCode(501, new { feature = "SDA-15", status = "not_implemented" });
+    [Authorize]
+    public async Task<ActionResult<MyMarksResponse>> Mine()
+    {
+        var studentId = CurrentUserId();
+
+        var internalMarks = await db.InternalMarks
+            .Where(m => m.StudentId == studentId && m.Published)
+            .Select(m => new InternalMarkDto(m.SubjectId, m.Subject.Name, m.Marks, m.PublishedAt))
+            .ToListAsync();
+
+        var externalMarks = await db.ExternalMarks
+            .Where(m => m.StudentId == studentId && m.Published)
+            .Select(m => new ExternalMarkDto(m.SubjectId, m.Subject.Name, m.Grade, m.ApprovedAt))
+            .ToListAsync();
+
+        return Ok(new MyMarksResponse(internalMarks, externalMarks));
+    }
+
+    private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
 
     // PRT-02 — attendance + published marks only, matching SDA-15's publish rule.
     [HttpGet("ward/{studentId}")]

@@ -6,6 +6,11 @@ public record ExternalMarkDto(Guid SubjectId, string SubjectName, string Grade, 
 
 public record AttendanceRecordDto(DateOnly SessionDate, Guid SubjectId, string SubjectName, string Status);
 
+// SDA-15
+public record MyMarksResponse(
+    IReadOnlyList<InternalMarkDto> InternalMarks,
+    IReadOnlyList<ExternalMarkDto> ExternalMarks);
+
 public record WardRecordResponse(
     Guid StudentId,
     string StudentFullName,

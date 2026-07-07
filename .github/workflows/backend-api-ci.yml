@@ -1,0 +1,35 @@
+name: Backend API CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/backend-api/**"
+      - ".github/workflows/backend-api-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/backend-api/**"
+      - ".github/workflows/backend-api-ci.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend-api
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test BackendApi.Tests -c Release
