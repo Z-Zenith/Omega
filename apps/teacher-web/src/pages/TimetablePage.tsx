@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { CalendarGrid } from '@/components/CalendarGrid'
 import { getMyTimetable, createChangeRequest, ApiError } from '@/lib/api'
+import { useActiveSection } from '@/lib/activeSection'
 
 export function TimetablePage() {
   const [description, setDescription] = useState('')
@@ -11,6 +12,7 @@ export function TimetablePage() {
   const queryClient = useQueryClient()
 
   const timetable = useQuery({ queryKey: ['timetable', 'mine'], queryFn: getMyTimetable })
+  const { activeSlot } = useActiveSection()
 
   const changeRequestMutation = useMutation({
     mutationFn: createChangeRequest,
@@ -30,6 +32,12 @@ export function TimetablePage() {
           <CardDescription>Reflects the latest Admin-approved version (TWA-10).</CardDescription>
         </CardHeader>
         <CardContent>
+          {activeSlot && (
+            <p className="mb-3 text-sm">
+              Currently teaching <span className="font-medium">{activeSlot.sectionName}</span> —{' '}
+              {activeSlot.subjectName} (TWA-01).
+            </p>
+          )}
           {timetable.isLoading && <p>Loading…</p>}
           {timetable.isError && <p className="text-destructive">Could not load timetable.</p>}
           {timetable.data && <CalendarGrid slots={timetable.data} />}

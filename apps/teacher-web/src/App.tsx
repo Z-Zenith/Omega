@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes, Link } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/lib/auth'
+import { ActiveSectionProvider } from '@/lib/activeSection'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
@@ -34,30 +35,32 @@ function Shell({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/timetable"
-          element={
-            <RequireAuth>
-              <Shell>
-                <TimetablePage />
-              </Shell>
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/events"
-          element={
-            <RequireAuth>
-              <Shell>
-                <EventsPage />
-              </Shell>
-            </RequireAuth>
-          }
-        />
-        <Route path="*" element={<Navigate to="/timetable" replace />} />
-      </Routes>
+      <ActiveSectionProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/timetable"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <TimetablePage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/events"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <EventsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route path="*" element={<Navigate to="/timetable" replace />} />
+        </Routes>
+      </ActiveSectionProvider>
     </AuthProvider>
   )
 }
