@@ -28,3 +28,10 @@ public record MyMarksResponse(List<InternalMarkDto> InternalMarks, List<External
 public record SubmitAssignmentRequest(string ContentUrl, string SubmissionFormat);
 
 public record SubmissionDto(Guid Id, Guid AssignmentId, Guid StudentId, string ContentUrl, DateTime SubmittedAt, bool IsLate, bool IsAutosubmitted);
+
+// SDA-25: no ClassSessionId here — the client only ever claims an AssignmentId it
+// already knows (from having opened that assignment); the backend resolves the active
+// class session itself when AssignmentId is omitted (see TelemetryController).
+public record TelemetryEventRequest(string EventType, Dictionary<string, object>? Metadata, Guid? AssignmentId, DateTime RecordedAt);
+
+public record SubmitTelemetryRequest(IReadOnlyList<TelemetryEventRequest> Events);

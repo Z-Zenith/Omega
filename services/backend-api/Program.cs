@@ -39,6 +39,14 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
 
+// SDA-25: AI Services (Track-2-owned) receives usage telemetry for suspicious-behaviour
+// analysis. Defaults to the docker-compose service name/port if not overridden.
+builder.Services.AddHttpClient("AiServices", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["AiServices:BaseUrl"] ?? "http://ai-services:8000");
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

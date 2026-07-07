@@ -81,6 +81,17 @@ public class ApiClient
             ?? throw new ApiException(500, "Empty auto-submit response");
     }
 
+    // SDA-25: batch of usage-pattern telemetry events, each already tagged by the caller
+    // with the active class session and/or assignment it was gathered during.
+    public async Task SubmitTelemetryAsync(IReadOnlyList<TelemetryEventRequest> events)
+    {
+        if (events.Count == 0)
+        {
+            return;
+        }
+        await SendAsync(HttpMethod.Post, "/api/v1/telemetry/usage", new SubmitTelemetryRequest(events));
+    }
+
     public async Task LogoutAsync()
     {
         if (Token is null)

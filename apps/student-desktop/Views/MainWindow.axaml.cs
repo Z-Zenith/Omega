@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -20,11 +21,15 @@ public partial class MainWindow : Window
 
     private readonly IAppClipboardService _clipboard = AppClipboardService.Instance;
 
+    private UsageTelemetryService? _telemetryService;
+
     public MainWindow()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Deactivated += OnDeactivated;
+        Deactivated += (_, _) => _telemetryService?.Record("window_blur");
+        Activated += (_, _) => _telemetryService?.Record("window_focus");
 
         // SDA-21: intercept every copy/cut/paste from any TextBox in the visual tree (these
         // events bubble up from wherever the control lives — Login, Shell, Calendar, Events,
@@ -65,12 +70,14 @@ public partial class MainWindow : Window
             _classLockService = shell.ClassLockService;
             _classLockService.LockStateChanged += OnLockStateChanged;
             ApplyLockState(_classLockService.IsLocked);
+            _telemetryService = shell.UsageTelemetryService;
         }
         else
         {
             // Logged out (or not logged in yet): no timetable to check against, so
             // there must be zero restriction.
             ApplyLockState(false);
+            _telemetryService = null;
         }
     }
 
@@ -162,6 +169,8 @@ public partial class MainWindow : Window
             {
                 // Mirrors TextBox.Paste(): insert at the caret / replace the current selection.
                 textBox.SelectedText = text;
+                // SDA-25: paste char_count feeds AIS-07's large-paste-burst heuristic.
+                _telemetryService?.Record("paste", new Dictionary<string, object> { ["char_count"] = text.Length });
             }
 
             // Prevent TextBox.Paste() from also reading from the real OS clipboard.
