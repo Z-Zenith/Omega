@@ -16,6 +16,7 @@ public partial class ShellViewModel : ViewModelBase
 
     public CalendarViewModel CalendarViewModel { get; }
     public EventsViewModel EventsViewModel { get; }
+    public ChangePasswordViewModel ChangePasswordViewModel { get; }
 
     [ObservableProperty]
     private ViewModelBase _currentPage;
@@ -27,6 +28,7 @@ public partial class ShellViewModel : ViewModelBase
         FullName = fullName;
         CalendarViewModel = new CalendarViewModel(apiClient);
         EventsViewModel = new EventsViewModel(apiClient);
+        ChangePasswordViewModel = new ChangePasswordViewModel(apiClient);
         _currentPage = CalendarViewModel;
     }
 
@@ -35,6 +37,9 @@ public partial class ShellViewModel : ViewModelBase
 
     [RelayCommand]
     private void ShowEvents() => CurrentPage = EventsViewModel;
+
+    [RelayCommand]
+    private void ShowChangePassword() => CurrentPage = ChangePasswordViewModel;
 
     [RelayCommand]
     private async Task SignOutAsync()
