@@ -40,3 +40,6 @@ public record MarkAttendanceResponse(Guid ClassSessionId, DateOnly SessionDate, 
 public record SubmitSectionFeedbackRequest(int Rating, string? Comments);
 
 public record SectionFeedbackDto(Guid Id, Guid SectionId, string SectionName, int Rating, string? Comments, DateTime SubmittedAt);
+
+// TWA-09
+public record AttendanceAlertDto(Guid StudentId, string StudentName, Guid SectionId, string SectionName, decimal AttendancePercentage);

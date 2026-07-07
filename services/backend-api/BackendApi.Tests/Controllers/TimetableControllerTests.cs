@@ -380,4 +380,107 @@ public class TimetableControllerTests
         var updated = await db.AttendanceRecords.SingleAsync(r => r.StudentId == fixture.Students[0].Id);
         Assert.Equal(AttendanceStatus.Absent, updated.Status);
     }
+
+    // TWA-09 helper: marks one more session for the slot's section, with a fixed status
+    // for every already-enrolled student in `fixture`, on a distinct sequential date so
+    // ordering by SessionDate is deterministic.
+    private static async Task MarkSessionAsync(TimetableController controller, Fixture fixture, DateOnly date, params (User student, string status)[] entries)
+    {
+        var byId = entries.ToDictionary(e => e.student.Id, e => e.status);
+        var all = fixture.Students.Select(s => new AttendanceEntryRequest(s.Id, byId.GetValueOrDefault(s.Id, "Present"))).ToList();
+        var result = await controller.MarkAttendance(new MarkAttendanceRequest(fixture.Slot.Id, date, all));
+        Assert.IsType<OkObjectResult>(result.Result);
+    }
+
+    // TWA-09 AC: alert fires the first time a student's cumulative attendance crosses
+    // below 65%, referencing the student and their current percentage.
+    [Fact]
+    public async Task Twa09_AttendanceAlerts_FiresWhenLatestSessionCrossesBelow65Percent()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+        var student = fixture.Students[0];
+        var controller = ControllerAs(db, teacher);
+
+        // 1 present, 1 present: 100% — nowhere near the threshold yet.
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 1), (student, "Present"));
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 2), (student, "Present"));
+        // Two absences bring cumulative to 2/4 = 50%, crossing below 65% on this call.
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 3), (student, "Absent"));
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 4), (student, "Absent"));
+
+        var result = await controller.AttendanceAlerts();
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var alerts = Assert.IsType<List<AttendanceAlertDto>>(ok.Value);
+
+        var alert = Assert.Single(alerts);
+        Assert.Equal(student.Id, alert.StudentId);
+        Assert.Equal(fixture.Slot.SectionId, alert.SectionId);
+        Assert.Equal(50m, alert.AttendancePercentage);
+    }
+
+    // TWA-09 AC: must not fire on every subsequent poll while still below 65% — only at
+    // the exact session that caused the crossing.
+    [Fact]
+    public async Task Twa09_AttendanceAlerts_DoesNotFireAgainOnceAlreadyBelowThreshold()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+        var student = fixture.Students[0];
+        var controller = ControllerAs(db, teacher);
+
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 1), (student, "Present"));
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 2), (student, "Absent"));
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 3), (student, "Absent"));
+        // Crossed below 65% as of 7/3 (1/3 = 33%). One more absence keeps it below —
+        // this should NOT still be reported as a fresh alert.
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 4), (student, "Absent"));
+
+        var result = await controller.AttendanceAlerts();
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var alerts = Assert.IsType<List<AttendanceAlertDto>>(ok.Value);
+
+        Assert.Empty(alerts);
+    }
+
+    [Fact]
+    public async Task Twa09_AttendanceAlerts_DoesNotFireWhileAboveThreshold()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+        var student = fixture.Students[0];
+        var controller = ControllerAs(db, teacher);
+
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 1), (student, "Present"));
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 2), (student, "Present"));
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 3), (student, "Absent"));
+
+        var result = await controller.AttendanceAlerts();
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var alerts = Assert.IsType<List<AttendanceAlertDto>>(ok.Value);
+
+        Assert.Empty(alerts);
+    }
+
+    [Fact]
+    public async Task Twa09_AttendanceAlerts_ScopedToCallingTeachersOwnSections()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+        db.Users.Add(otherTeacher);
+        await db.SaveChangesAsync();
+        var controller = ControllerAs(db, teacher);
+        await MarkSessionAsync(controller, fixture, new DateOnly(2026, 7, 1), (fixture.Students[0], "Absent"));
+
+        var otherController = ControllerAs(db, otherTeacher);
+        var result = await otherController.AttendanceAlerts();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(Assert.IsType<List<AttendanceAlertDto>>(ok.Value));
+    }
 }
