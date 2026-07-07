@@ -7,6 +7,10 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ApiClient _apiClient = new();
 
+    // SDA-12: exposed so the window's code-behind can fire an exit-ping on focus-loss/close
+    // without the view needing its own copy of session/auth state.
+    public ApiClient ApiClient => _apiClient;
+
     [ObservableProperty]
     private ViewModelBase _currentPage;
 

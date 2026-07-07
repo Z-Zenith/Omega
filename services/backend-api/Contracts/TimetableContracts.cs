@@ -21,3 +21,6 @@ public record PatchSlotRequest(Guid? TeacherId, int? DayOfWeek, TimeOnly? StartT
 public record CreateChangeRequestRequest(string Description);
 
 public record ChangeRequestDto(Guid Id, string Description, string Status, DateTime RequestedAt);
+
+// SDA-12
+public record ExitPingResponse(bool Notified, Guid? ClassSessionId, Guid? NotifiedTeacherId);

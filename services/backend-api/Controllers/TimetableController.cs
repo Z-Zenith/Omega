@@ -12,7 +12,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class TimetableController(AppDbContext db, IPermissionService permissions) : ControllerBase
+public class TimetableController(AppDbContext db, IPermissionService permissions, INotificationRouter notifications) : ControllerBase
 {
     // 5 weekdays x 6 one-hour periods starting 9am. MVP scheduling heuristic, not a
     // constraint solver — enough to satisfy AWA-01/AWA-02's stated acceptance criteria.
@@ -220,6 +220,43 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         await db.SaveChangesAsync();
 
         return Ok(new ChangeRequestDto(changeRequest.Id, changeRequest.Description, changeRequest.Status, changeRequest.RequestedAt));
+    }
+
+    // SDA-12 — the Student Desktop App calls this whenever it loses effective focus or is
+    // closed. The check for "is there actually a class session happening right now" lives
+    // entirely server-side (ClassSessionLookup); the client doesn't need its own timetable
+    // logic, it just always pings on exit/focus-loss and this is a no-op when there's no
+    // active session. On a hit, this posts through the Notification Router (shared code —
+    // see INotificationRouter) with the exit_ping notification type; the router owns
+    // persistence + real-time delivery, this endpoint only decides *whether* and *who*.
+    [HttpPost("class-sessions/exit-ping")]
+    public async Task<ActionResult<ExitPingResponse>> ExitPing()
+    {
+        var studentId = CurrentUserId();
+        var student = await db.Users.FindAsync(studentId);
+        if (student is null || student.AccountType != AccountType.Student)
+        {
+            return Forbid();
+        }
+
+        var active = await ClassSessionLookup.FindOrStartActiveSessionAsync(db, studentId, DateTime.UtcNow);
+        if (active is null)
+        {
+            return Ok(new ExitPingResponse(false, null, null));
+        }
+
+        await notifications.RouteAsync(active.TeacherId, NotificationType.ExitPing, new
+        {
+            studentId,
+            studentName = student.FullName,
+            classSessionId = active.ClassSessionId,
+            sectionId = active.SectionId,
+            sectionName = active.SectionName,
+            subjectId = active.SubjectId,
+            occurredAt = DateTime.UtcNow,
+        });
+
+        return Ok(new ExitPingResponse(true, active.ClassSessionId, active.TeacherId));
     }
 
     // TWA-08
