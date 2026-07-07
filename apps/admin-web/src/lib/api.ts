@@ -122,4 +122,26 @@ export function createEvent(event: {
   })
 }
 
+export interface DepartmentDto {
+  id: string
+  collegeId: string
+  name: string
+  hodRoleBindingId: string | null
+  hodUserId: string | null
+}
+
+export function createDepartment(department: { collegeId: string; name: string }) {
+  return request<DepartmentDto>('/departments', {
+    method: 'POST',
+    body: JSON.stringify(department),
+  })
+}
+
+export function assignHod(departmentId: string, userId: string) {
+  return request<DepartmentDto>(`/departments/${departmentId}/hod`, {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  })
+}
+
 export { ApiError }
