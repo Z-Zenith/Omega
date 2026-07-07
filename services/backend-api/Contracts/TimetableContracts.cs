@@ -35,3 +35,8 @@ public record MarkAttendanceRequest(Guid TimetableSlotId, DateOnly? SessionDate,
 public record MarkedAttendanceDto(Guid StudentId, string StudentName, string Status);
 
 public record MarkAttendanceResponse(Guid ClassSessionId, DateOnly SessionDate, Guid SectionId, List<MarkedAttendanceDto> Records);
+
+// TWA-12
+public record SubmitSectionFeedbackRequest(int Rating, string? Comments);
+
+public record SectionFeedbackDto(Guid Id, Guid SectionId, string SectionName, int Rating, string? Comments, DateTime SubmittedAt);
