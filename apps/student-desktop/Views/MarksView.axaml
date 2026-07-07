@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:models="using:StudentDesktop.Models"
+             xmlns:avconv="using:Avalonia.Data.Converters"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.MarksView"
+             x:DataType="vm:MarksViewModel">
+
+    <ScrollViewer>
+        <StackPanel Margin="20" Spacing="16">
+            <TextBlock Text="Marks" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="Published marks per subject/assignment (SDA-15). Marks that haven't been published yet are never shown here."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed" IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+
+            <TextBlock Text="Internal Marks" FontSize="16" FontWeight="Bold"/>
+            <ItemsControl ItemsSource="{Binding InternalMarks}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:InternalMarkDto">
+                        <Border Background="#F7F7F7" CornerRadius="6" Padding="12" Margin="0,0,0,8">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Grid.Column="0" Text="{Binding SubjectName}" FontWeight="Bold"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Marks}" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="No published internal marks yet." Foreground="Gray"
+                       IsVisible="{Binding !InternalMarks.Count}"/>
+
+            <TextBlock Text="External Marks" FontSize="16" FontWeight="Bold" Margin="0,12,0,0"/>
+            <ItemsControl ItemsSource="{Binding ExternalMarks}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:ExternalMarkDto">
+                        <Border Background="#F7F7F7" CornerRadius="6" Padding="12" Margin="0,0,0,8">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Grid.Column="0" Text="{Binding SubjectName}" FontWeight="Bold"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Grade}" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="No published external marks yet." Foreground="Gray"
+                       IsVisible="{Binding !ExternalMarks.Count}"/>
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>
