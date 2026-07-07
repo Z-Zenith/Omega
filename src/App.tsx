@@ -4,6 +4,7 @@ import { ActiveSectionProvider } from '@/lib/activeSection'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
 
@@ -20,6 +21,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <nav className="flex items-center justify-between border-b px-8 py-4">
         <div className="flex gap-6 text-sm font-medium">
           <Link to="/timetable">Timetable</Link>
+          <Link to="/attendance">Attendance</Link>
           <Link to="/events">Events</Link>
           <Link to="/marks">Marks</Link>
           <Link to="/messages">Messages</Link>
@@ -48,6 +50,16 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <TimetablePage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/attendance"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <AttendancePage />
                 </Shell>
               </RequireAuth>
             }
