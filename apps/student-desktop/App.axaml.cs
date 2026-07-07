@@ -20,10 +20,15 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow
+            var mainWindowViewModel = new MainWindowViewModel();
+            var mainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(),
+                DataContext = mainWindowViewModel,
             };
+            // SDA-11: hook exit/focus-loss detection to the main window once, for the
+            // lifetime of the app.
+            mainWindowViewModel.AutoSubmitService.AttachTo(mainWindow);
+            desktop.MainWindow = mainWindow;
         }
 
         base.OnFrameworkInitializationCompleted();
