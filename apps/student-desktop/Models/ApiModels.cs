@@ -22,6 +22,15 @@ public record ExternalMarkDto(Guid SubjectId, string SubjectName, string Grade, 
 
 public record MyMarksResponse(List<InternalMarkDto> InternalMarks, List<ExternalMarkDto> ExternalMarks);
 
+// SDA-17. SubjectName is display-only context for the picker — the feedback itself
+// (SubmitTeacherFeedbackRequest) only carries TeacherId, matching the backend's
+// teacher_feedback schema, which has no subject/course column.
+public record MyTeacherDto(Guid TeacherId, string TeacherName, Guid SubjectId, string SubjectName);
+
+public record SubmitTeacherFeedbackRequest(Guid TeacherId, int Rating, string? Comments);
+
+public record TeacherFeedbackDto(Guid Id, Guid TeacherId, int Rating, string? Comments, DateTime SubmittedAt);
+
 // SDA-11: request/response shapes for the auto-submit-on-exit endpoint
 // (POST /api/v1/assignments/{id}/submissions/auto-submit). SubmissionFormat mirrors the
 // backend's AssignmentType enum, serialized as a string (see Program.cs JsonStringEnumConverter).

@@ -71,6 +71,21 @@ public class ApiClient
             ?? new MyMarksResponse([], []);
     }
 
+    // SDA-17
+    public async Task<List<MyTeacherDto>> GetMyTeachersAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/teacher-feedback/my-teachers");
+        return await response.Content.ReadFromJsonAsync<List<MyTeacherDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<TeacherFeedbackDto> SubmitTeacherFeedbackAsync(Guid teacherId, int rating, string? comments)
+    {
+        var response = await SendAsync(HttpMethod.Post, "/api/v1/teacher-feedback",
+            new SubmitTeacherFeedbackRequest(teacherId, rating, comments));
+        return await response.Content.ReadFromJsonAsync<TeacherFeedbackDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty feedback response");
+    }
+
     // SDA-11: called by AssignmentAutoSubmitService when the app detects exit or
     // focus-loss during an active assignment window.
     public async Task<SubmissionDto> AutoSubmitAssignmentAsync(Guid assignmentId, string contentUrl, string submissionFormat)
