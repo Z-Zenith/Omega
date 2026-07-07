@@ -3,18 +3,8 @@ name: Web Apps CI
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "apps/parent-portal/**"
-      - "apps/teacher-web/**"
-      - "apps/admin-web/**"
-      - ".github/workflows/web-ci.yml"
   push:
     branches: [main]
-    paths:
-      - "apps/parent-portal/**"
-      - "apps/teacher-web/**"
-      - "apps/admin-web/**"
-      - ".github/workflows/web-ci.yml"
 
 jobs:
   build:
@@ -46,3 +36,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Audit for critical vulnerabilities
+        run: npm audit --audit-level=critical
