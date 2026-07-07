@@ -13,7 +13,7 @@
  * call out the criterion that drove the shape.
  *
  * Status of the five features:
- *   - SEK-01 (Code editor)            — Must — interface only.
+ *   - SEK-01 (Code editor)            — Must — implemented (CodeEditor).
  *   - SEK-02 (Document viewer)        — Must — interface only.
  *   - SEK-03 (Markdown notes)         — Must — implemented (NotesEditor).
  *   - SEK-04 (Built-in image search)  — Could — interface only.
@@ -53,7 +53,7 @@ export type {
   CodeEditorProps,
   CodeEditorApi,
 } from './code-editor/index.js';
-export { LANGUAGE_LABELS } from './code-editor/index.js';
+export { LANGUAGE_LABELS, CodeEditor, isSupportedLanguage } from './code-editor/index.js';
 
 // SEK-02 — Document viewer & annotator
 export type {
