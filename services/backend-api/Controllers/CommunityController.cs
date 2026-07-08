@@ -197,6 +197,76 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         return Redirect(material.FileUrl);
     }
 
+    // SDA-18: "every enrolled subject has a non-empty course-info and teacher-info
+    // entry" — enrollment is derived from section_enrollments -> timetable_slots ->
+    // subjects, since that's the only place "which subjects does this student take" is
+    // actually recorded (there's no direct student-subject table).
+    [HttpGet("subjects/mine")]
+    public async Task<ActionResult<List<CourseInfoDto>>> MySubjects()
+    {
+        var studentId = CurrentUserId();
+
+        var sectionIds = await db.SectionEnrollments
+            .Where(e => e.StudentId == studentId)
+            .Select(e => e.SectionId)
+            .ToListAsync();
+
+        var subjectIds = await db.TimetableSlots
+            .Where(t => sectionIds.Contains(t.SectionId))
+            .Select(t => t.SubjectId)
+            .Distinct()
+            .ToListAsync();
+
+        var courses = await db.Subjects
+            .Where(s => subjectIds.Contains(s.Id))
+            .Select(s => new CourseInfoDto(s.Id, s.Code, s.Name, s.TeacherId, s.Teacher != null ? s.Teacher.FullName : null))
+            .ToListAsync();
+
+        return Ok(courses);
+    }
+
+    // SDA-17: "feedback is attributable to the course/teacher it was submitted
+    // against" — attributed via TeacherId (teacher_feedback has no subject_id column;
+    // SDA-18's course list is what resolves a teacher back to a specific course for the
+    // student submitting feedback).
+    [HttpPost("teacher-feedback")]
+    public async Task<ActionResult<TeacherFeedbackDto>> SubmitTeacherFeedback(SubmitTeacherFeedbackRequest request)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (caller.AccountType != AccountType.Student)
+        {
+            return Forbid();
+        }
+        if (request.Rating is < 1 or > 5)
+        {
+            return BadRequest(new { error = "invalid_rating", message = "Rating must be between 1 and 5." });
+        }
+
+        var teacher = await db.Users.FindAsync(request.TeacherId);
+        if (teacher is null || teacher.AccountType != AccountType.Teacher)
+        {
+            return BadRequest(new { error = "unknown_teacher", message = "No teacher exists with that id." });
+        }
+
+        var feedback = new TeacherFeedback
+        {
+            Id = Guid.NewGuid(),
+            StudentId = caller.Id,
+            TeacherId = request.TeacherId,
+            Rating = request.Rating,
+            Comments = request.Comments,
+            SubmittedAt = DateTime.UtcNow,
+        };
+        db.TeacherFeedbacks.Add(feedback);
+        await db.SaveChangesAsync();
+
+        return Ok(new TeacherFeedbackDto(feedback.Id, feedback.StudentId, feedback.TeacherId, feedback.Rating, feedback.Comments, feedback.SubmittedAt));
+    }
+
     private async Task<bool> CanViewMaterialAsync(Material material, User caller)
     {
         if (material.UploadedBy == caller.Id || caller.AccountType == AccountType.AdminTier)

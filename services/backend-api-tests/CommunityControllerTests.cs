@@ -224,4 +224,102 @@ public class CommunityControllerTests
         Assert.Equal(student.Id, dto.AuthorId);
         Assert.Single(await db.GroupPosts.Where(p => p.GroupId == group.Id).ToListAsync());
     }
+
+    // SDA-18: "every enrolled subject has a non-empty course-info and teacher-info entry".
+    [Fact]
+    public async Task Sda18_MySubjects_ReturnsCourseAndTeacherInfo_ForEnrolledSubjectsOnly()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher);
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "CS" };
+        var enrolledSection = new Section { Id = Guid.NewGuid(), DepartmentId = department.Id, Year = 3, Name = "3rd Year CSE - A" };
+        var otherSection = new Section { Id = Guid.NewGuid(), DepartmentId = department.Id, Year = 3, Name = "3rd Year CSE - B" };
+        var enrolledSubject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS101", Name = "Intro to CS", TeacherId = teacher.Id };
+        var otherSubject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS202", Name = "Not Mine", TeacherId = teacher.Id };
+        db.Users.AddRange(student, teacher);
+        db.Departments.Add(department);
+        db.Sections.AddRange(enrolledSection, otherSection);
+        db.Subjects.AddRange(enrolledSubject, otherSubject);
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = enrolledSection.Id, StudentId = student.Id });
+        db.TimetableSlots.AddRange(
+            new TimetableSlot { Id = Guid.NewGuid(), SectionId = enrolledSection.Id, SubjectId = enrolledSubject.Id, TeacherId = teacher.Id, DayOfWeek = 1, StartTime = new TimeOnly(9, 0), EndTime = new TimeOnly(10, 0) },
+            new TimetableSlot { Id = Guid.NewGuid(), SectionId = otherSection.Id, SubjectId = otherSubject.Id, TeacherId = teacher.Id, DayOfWeek = 1, StartTime = new TimeOnly(10, 0), EndTime = new TimeOnly(11, 0) });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.MySubjects();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var courses = Assert.IsType<List<CourseInfoDto>>(ok.Value);
+        var course = Assert.Single(courses);
+        Assert.Equal("Intro to CS", course.Name);
+        Assert.Equal(teacher.FullName, course.TeacherName);
+    }
+
+    // SDA-17: "feedback is attributable to the course/teacher it was submitted against".
+    [Fact]
+    public async Task Sda17_SubmitTeacherFeedback_ForbidsNonStudents()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.SubmitTeacherFeedback(new SubmitTeacherFeedbackRequest(teacher.Id, 5, "Great"));
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(6)]
+    public async Task Sda17_SubmitTeacherFeedback_RejectsRatingOutsideOneToFive(int rating)
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.AddRange(student, teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.SubmitTeacherFeedback(new SubmitTeacherFeedbackRequest(teacher.Id, rating, null));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Sda17_SubmitTeacherFeedback_RejectsUnknownTeacher()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.SubmitTeacherFeedback(new SubmitTeacherFeedbackRequest(Guid.NewGuid(), 4, null));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Sda17_SubmitTeacherFeedback_CreatesFeedback_AttributableToTheTeacher()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.AddRange(student, teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.SubmitTeacherFeedback(new SubmitTeacherFeedbackRequest(teacher.Id, 4, "Clear explanations"));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TeacherFeedbackDto>(ok.Value);
+        Assert.Equal(teacher.Id, dto.TeacherId);
+        Assert.Equal(student.Id, dto.StudentId);
+        Assert.Equal(4, dto.Rating);
+        Assert.Single(await db.TeacherFeedbacks.Where(f => f.TeacherId == teacher.Id).ToListAsync());
+    }
 }

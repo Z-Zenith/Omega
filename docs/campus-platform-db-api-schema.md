@@ -378,6 +378,8 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | POST | `/groups/{id}/posts` | SDA-16 |
 | POST | `/materials` | TWA-06 |
 | GET | `/materials/{id}/download` | API-03 |
+| GET | `/subjects/mine` | SDA-18 — enrollment derived from section_enrollments -> timetable_slots -> subjects |
+| POST | `/teacher-feedback` | SDA-17 |
 
 ### Calendar & Events
 | Method | Path | Feature |
