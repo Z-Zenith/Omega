@@ -67,6 +67,7 @@ services:
       # Required in non-Development environments — backend-api fails fast at startup if unset.
       # Set JWT_SIGNING_KEY in the shell/.env before `docker compose up`; never commit a real value.
       Jwt__Key: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY before starting backend-api}
+      AiServices__BaseUrl: "http://ai-services:8000"
     ports:
       - "8080:8080"
     volumes:
@@ -78,6 +79,8 @@ services:
       postgres:
         condition: service_healthy
       authz:
+        condition: service_healthy
+      ai-services:
         condition: service_healthy
     # Defense-in-depth container ceiling (#138).
     mem_limit: 1g
