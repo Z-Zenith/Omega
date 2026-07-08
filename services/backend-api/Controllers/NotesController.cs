@@ -62,7 +62,7 @@ public class NotesController(AppDbContext db) : ControllerBase
         var now = DateTime.UtcNow;
         var note = new Note
         {
-            Id = Guid.NewGuid(),
+            Id = request.Id ?? Guid.NewGuid(),
             OwnerId = userId,
             Title = request.Title.Trim(),
             ContentMarkdown = request.ContentMarkdown ?? "",
@@ -70,6 +70,12 @@ public class NotesController(AppDbContext db) : ControllerBase
             UpdatedAt = now,
         };
         db.Notes.Add(note);
+
+        if (request.Links is not null)
+        {
+            await SyncOutgoingLinksAsync(note, request.Links);
+        }
+
         await db.SaveChangesAsync();
 
         return Ok(ToDto(note));
@@ -97,9 +103,96 @@ public class NotesController(AppDbContext db) : ControllerBase
         note.Title = request.Title.Trim();
         note.ContentMarkdown = request.ContentMarkdown ?? "";
         note.UpdatedAt = DateTime.UtcNow;
+
+        if (request.Links is not null)
+        {
+            await SyncOutgoingLinksAsync(note, request.Links);
+        }
+
         await db.SaveChangesAsync();
 
         return Ok(ToDto(note));
+    }
+
+    // SDA-19/SEK-03: "Deleting a note removes it; links to it resolve to a not-found
+    // state, not a crash" — clean up note_links in both directions so no dangling FK
+    // rows are left behind and onResolveLink correctly returns note_not_found after this.
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var userId = CurrentUserId();
+
+        var note = await db.Notes.FindAsync(id);
+        if (note is null)
+        {
+            return NotFound();
+        }
+        if (note.OwnerId != userId)
+        {
+            return Forbid();
+        }
+
+        var relatedLinks = await db.NoteLinks
+            .Where(l => l.FromNoteId == id || l.ToNoteId == id)
+            .ToListAsync();
+        db.NoteLinks.RemoveRange(relatedLinks);
+        db.Notes.Remove(note);
+        await db.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    // SDA-19/SEK-03: "who links TO this note" — backs NotesEditorProps.onListBacklinks.
+    [HttpGet("{id}/backlinks")]
+    public async Task<ActionResult<List<NoteDto>>> Backlinks(Guid id)
+    {
+        var userId = CurrentUserId();
+
+        var target = await db.Notes.FindAsync(id);
+        if (target is null)
+        {
+            return NotFound();
+        }
+        if (target.OwnerId != userId)
+        {
+            return Forbid();
+        }
+
+        var backlinks = await db.NoteLinks
+            .Where(l => l.ToNoteId == id)
+            .Join(db.Notes, l => l.FromNoteId, n => n.Id, (_, n) => n)
+            .Where(n => n.OwnerId == userId)
+            .OrderByDescending(n => n.UpdatedAt)
+            .ToListAsync();
+
+        return Ok(backlinks.Select(ToDto).ToList());
+    }
+
+    // Outgoing links are parsed client-side (SEK's extractOutgoingLinks) and handed to
+    // us as-is; we just resync note_links to match. Dedupe by target — the unique
+    // (from_note_id, to_note_id) index rejects a note linking to the same target twice.
+    private async Task SyncOutgoingLinksAsync(Note fromNote, IReadOnlyList<NoteLinkInput> links)
+    {
+        var existing = await db.NoteLinks.Where(l => l.FromNoteId == fromNote.Id).ToListAsync();
+        db.NoteLinks.RemoveRange(existing);
+
+        var now = DateTime.UtcNow;
+        var deduped = links
+            .Where(l => l.ToNoteId != fromNote.Id)
+            .GroupBy(l => l.ToNoteId)
+            .Select(g => g.First());
+
+        foreach (var link in deduped)
+        {
+            db.NoteLinks.Add(new NoteLink
+            {
+                Id = Guid.NewGuid(),
+                FromNote = fromNote,
+                ToNoteId = link.ToNoteId,
+                Anchor = link.Anchor,
+                CreatedAt = now,
+            });
+        }
     }
 
     private static NoteDto ToDto(Note n) => new(n.Id, n.Title, n.ContentMarkdown, n.CreatedAt, n.UpdatedAt);
