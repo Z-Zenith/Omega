@@ -90,6 +90,14 @@ builder.Services.AddHttpClient("AiServices", client =>
     client.Timeout = TimeSpan.FromSeconds(10);
 });
 
+// AIS-03/04/07: self-hosted AI Services container (services/ai-services, FastAPI).
+// Same default as the "AiServices" named client above so both fall back consistently
+// when AiServices:BaseUrl isn't set.
+builder.Services.AddHttpClient<IAiServicesClient, AiServicesClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["AiServices:BaseUrl"] ?? "http://ai-services:8000");
+});
+
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSection["Key"];
 if (string.IsNullOrWhiteSpace(jwtKey))
