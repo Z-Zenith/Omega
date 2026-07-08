@@ -7,6 +7,7 @@ using BackendApi.Tests.Fakes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace BackendApi.Tests.Controllers;
 
@@ -26,17 +27,24 @@ public class AssignmentsControllerTests
         IsActive = true,
     };
 
-    private static AssignmentsController ControllerAs(AppDbContext db, User user, FakeAiServicesClient? aiServices = null) => new(db, aiServices ?? new FakeAiServicesClient())
+    private static Department NewDepartment() => new() { Id = Guid.NewGuid(), Name = "CS", CollegeId = Guid.NewGuid() };
+
+    private static AssignmentsController ControllerAs(
+        AppDbContext db, User user, FakeAiServicesClient? aiServices = null, FakeCopyleaksClient? copyleaks = null)
     {
-        ControllerContext = new ControllerContext
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Copyleaks:WebhookSecret"] = "test-secret" })
+            .Build();
+        return new AssignmentsController(db, aiServices ?? new FakeAiServicesClient(), copyleaks ?? new FakeCopyleaksClient(), configuration)
         {
-            HttpContext = new DefaultHttpContext
+            ControllerContext = new ControllerContext
             {
-                User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth")),
+                HttpContext = new DefaultHttpContext { User = principal, Request = { Scheme = "https", Host = new HostString("campus.test") } },
             },
-        },
-    };
+        };
+    }
 
     // #135 (already merged, see below) requires the submitting student to be enrolled in a
     // section the assignment's subject is taught to - seed that link too so these #159 tests
@@ -180,7 +188,7 @@ public class AssignmentsControllerTests
     }
 
     private static AssignmentsController ControllerAs(AppDbContext db, Guid userId) =>
-        new(db, new FakeAiServicesClient())
+        new(db, new FakeAiServicesClient(), new FakeCopyleaksClient(), new ConfigurationBuilder().Build())
         {
             ControllerContext = new ControllerContext
             {
@@ -312,6 +320,132 @@ public class AssignmentsControllerTests
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Empty(await db.CopyCheckFlags.ToListAsync());
+    }
+
+    // AIS-02
+    [Fact]
+    public async Task Ais02_RequestPlagiarismCheck_ForbidsCallersWhoAreNotTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.RequestPlagiarismCheck(submission.Id);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task Ais02_RequestPlagiarismCheck_WithoutCopyleaksConfigured_Returns503()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher, copyleaks: new FakeCopyleaksClient { Configured = false });
+        var result = Assert.IsType<ObjectResult>(await controller.RequestPlagiarismCheck(submission.Id));
+
+        Assert.Equal(503, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ais02_RequestPlagiarismCheck_SubmitsScanKeyedToTheSubmission()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var fakeCopyleaks = new FakeCopyleaksClient();
+        var controller = ControllerAs(db, teacher, copyleaks: fakeCopyleaks);
+        var result = Assert.IsType<AcceptedResult>(await controller.RequestPlagiarismCheck(submission.Id));
+
+        var accepted = Assert.IsType<PlagiarismCheckAcceptedDto>(result.Value);
+        Assert.Equal("pending", accepted.Status);
+        Assert.Equal(submission.Id.ToString("N"), fakeCopyleaks.LastScanId);
+        Assert.Equal("an essay", fakeCopyleaks.LastContent);
+        Assert.Contains("secret=test-secret", fakeCopyleaks.LastWebhookUrlTemplate);
+    }
+
+    [Fact]
+    public async Task Ais02_PlagiarismReport_ForbidsCallersWhoAreNotTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.PlagiarismReport(submission.Id);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task Ais02_PlagiarismReport_ReturnsPendingStatus_BeforeTheWebhookFires()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = Assert.IsType<OkObjectResult>(await controller.PlagiarismReport(submission.Id));
+
+        var status = Assert.IsType<PlagiarismReportStatusDto>(result.Value);
+        Assert.Equal("pending", status.Status);
+    }
+
+    [Fact]
+    public async Task Ais02_PlagiarismReport_ReturnsThePersistedReport_OnceOneExists()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        db.PlagiarismReports.Add(new PlagiarismReport
+        {
+            Id = Guid.NewGuid(),
+            SubmissionId = submission.Id,
+            SimilarityScore = 0.12m,
+            CopyleaksScanId = submission.Id.ToString("N"),
+            MatchedSources = "[\"https://example.com\"]",
+            CheckedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = Assert.IsType<OkObjectResult>(await controller.PlagiarismReport(submission.Id));
+
+        var dto = Assert.IsType<PlagiarismReportDto>(result.Value);
+        Assert.Equal(0.12m, dto.SimilarityScore);
+        Assert.Equal(["https://example.com"], dto.MatchedSources);
     }
 
     // AIS-04

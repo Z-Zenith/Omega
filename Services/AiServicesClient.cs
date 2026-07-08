@@ -12,12 +12,12 @@ public record TelemetryEventInput(string StudentId, string? ClassSessionId, stri
 
 public record SuspiciousFlagResult(string StudentId, string? ClassSessionId, string? AssignmentId, double ConfidenceScore, IReadOnlyList<string> Reasons);
 
-// AIS-03/04/07: thin HTTP client for the self-hosted AI Services container
-// (services/ai-services — FastAPI, no external credentials). AIS-01 isn't wired here yet
-// — it needs a raw browsing-visit-log table that doesn't exist in the schema, a DB
-// change out of scope for a unilateral PR (CLAUDE.md: ask before changing the DB
-// schema). AIS-02/05 (Copyleaks/Pangram) are external-API-only and out of scope too —
-// no client credentials are available in this environment.
+public record BrowsingVisitInput(string Url, DateTime VisitedAt, int? DurationSeconds);
+
+// AIS-01/03/04/07: thin HTTP client for the self-hosted AI Services container
+// (services/ai-services — FastAPI, no external credentials). AIS-02/05 (Copyleaks/
+// Pangram) are external-API-only and out of scope — no client credentials are
+// available in this environment.
 public interface IAiServicesClient
 {
     Task<IReadOnlyList<SimilarityMatchResult>> CheckSimilarityAsync(
@@ -28,6 +28,8 @@ public interface IAiServicesClient
 
     Task<IReadOnlyList<SuspiciousFlagResult>> CheckSuspiciousBehaviourAsync(
         IReadOnlyList<TelemetryEventInput> events, double minConfidence, CancellationToken ct = default);
+
+    Task<string> SummarizeBrowsingAsync(IReadOnlyList<BrowsingVisitInput> visits, CancellationToken ct = default);
 }
 
 public class AiServicesClient(HttpClient http) : IAiServicesClient
@@ -74,4 +76,15 @@ public class AiServicesClient(HttpClient http) : IAiServicesClient
         return result?.Flags ?? [];
     }
 
+    private sealed record BrowsingSummaryRequestBody(IReadOnlyList<BrowsingVisitInput> Visits);
+    private sealed record BrowsingSummaryResponseBody(string Summary);
+
+    public async Task<string> SummarizeBrowsingAsync(IReadOnlyList<BrowsingVisitInput> visits, CancellationToken ct = default)
+    {
+        var body = new BrowsingSummaryRequestBody(visits);
+        var response = await http.PostAsJsonAsync("/api/v1/browsing-summary", body, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<BrowsingSummaryResponseBody>(cancellationToken: ct);
+        return result?.Summary ?? "";
+    }
 }

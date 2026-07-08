@@ -3,6 +3,7 @@ using BackendApi.Contracts;
 using BackendApi.Controllers;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using BackendApi.Services;
 using BackendApi.Tests.Fakes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -31,11 +32,24 @@ public class BrowsingControllerTests
         IsActive = true,
     };
 
+    // Mirrors PermissionService's actual resolution (role_default_permissions), but as a
+    // direct grant so tests don't need to seed roles/role-bindings just to exercise the
+    // controller's permission check.
+    private static PermissionGrant GrantViewBrowsingHistory(Guid userId) => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = userId,
+        PermissionCode = "view_browsing_history",
+        Granted = true,
+        GrantedBy = Guid.NewGuid(),
+        CreatedAt = DateTime.UtcNow,
+    };
+
     private static BrowsingController ControllerAs(AppDbContext db, User user, FakeAiServicesClient? aiServices = null)
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
-        return new BrowsingController(db, aiServices ?? new FakeAiServicesClient())
+        return new BrowsingController(db, aiServices ?? new FakeAiServicesClient(), new PermissionService(db))
         {
             ControllerContext = new ControllerContext
             {
@@ -417,5 +431,119 @@ public class BrowsingControllerTests
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Empty(await db.SuspiciousFlags.ToListAsync());
+    }
+
+    // AIS-01: "a role without that permission cannot see the summary anywhere, including
+    // in the student's own profile view" — no self-view exception, even for Admin viewing
+    // their own (irrelevant) summary or a student viewing their own.
+    [Fact]
+    public async Task Ais01_BrowsingSummary_ForbidsCallersWithoutViewBrowsingHistoryPermission()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.BrowsingSummary(student.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais01_BrowsingSummary_ForbidsAStudentFromViewingTheirOwnSummary_WithoutThePermission()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        db.BrowsingHistories.Add(new BrowsingHistory { Id = Guid.NewGuid(), StudentId = student.Id, Url = "https://example.com", VisitedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.BrowsingSummary(student.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais01_BrowsingSummary_GeneratesAndPersistsASummary_ForAnAuthorizedCaller()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student);
+        db.Users.AddRange(admin, student);
+        db.PermissionGrants.Add(GrantViewBrowsingHistory(admin.Id));
+        db.BrowsingHistories.Add(new BrowsingHistory { Id = Guid.NewGuid(), StudentId = student.Id, Url = "https://example.com", VisitedAt = DateTime.UtcNow, DurationSeconds = 120 });
+        await db.SaveChangesAsync();
+
+        var fakeAi = new FakeAiServicesClient { BrowsingSummaryText = "Visited example.com once." };
+        var controller = ControllerAs(db, admin, fakeAi);
+        var result = await controller.BrowsingSummary(student.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<BrowsingSummaryReportDto>(ok.Value);
+        Assert.Equal("Visited example.com once.", dto.SummaryText);
+        Assert.Single(await db.BrowsingHistorySummaries.Where(s => s.StudentId == student.Id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ais01_BrowsingSummary_ReturnsNotFound_ForUnknownStudent()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        db.Users.Add(admin);
+        db.PermissionGrants.Add(GrantViewBrowsingHistory(admin.Id));
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.BrowsingSummary(Guid.NewGuid());
+
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    // AIS-01
+    [Fact]
+    public async Task Ais01_LogBrowsingVisit_ForbidsNonStudents()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.LogBrowsingVisit(new LogBrowsingVisitRequest("https://example.com", null));
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task Ais01_LogBrowsingVisit_RejectsEmptyUrl()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.LogBrowsingVisit(new LogBrowsingVisitRequest("   ", null));
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task Ais01_LogBrowsingVisit_RecordsTheVisitForTheCaller()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.LogBrowsingVisit(new LogBrowsingVisitRequest("https://example.com", 45));
+
+        Assert.IsType<NoContentResult>(result);
+        var visit = Assert.Single(await db.BrowsingHistories.Where(v => v.StudentId == student.Id).ToListAsync());
+        Assert.Equal("https://example.com", visit.Url);
+        Assert.Equal(45, visit.DurationSeconds);
     }
 }
