@@ -294,6 +294,76 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         return Ok(new SectionFeedbackDto(feedback.Id, feedback.SectionId, section.Name, feedback.Rating, feedback.Comments, feedback.SubmittedAt));
     }
 
+    // TWA-04: class performance dashboard for a section, reflecting attendance (TWA-08)
+    // and internal marks (TWA-16) no older than the last write to either — both are read
+    // live here, not cached, so there is no separate "last sync" to go stale. Same
+    // TeacherSectionAssignment scoping as TWA-12: the caller must actually teach this
+    // section for at least one subject.
+    [HttpGet("timetable/sections/{sectionId}/performance-summary")]
+    public async Task<ActionResult<SectionPerformanceSummaryDto>> GetSectionPerformanceSummary(Guid sectionId)
+    {
+        var userId = CurrentUserId();
+
+        var taughtSubjectIds = await db.TeacherSectionAssignments
+            .Where(a => a.TeacherId == userId && a.SectionId == sectionId)
+            .Select(a => a.SubjectId)
+            .ToListAsync();
+        if (taughtSubjectIds.Count == 0)
+        {
+            return Forbid();
+        }
+
+        var section = await db.Sections.FindAsync(sectionId);
+        if (section is null)
+        {
+            return NotFound();
+        }
+
+        var students = await db.SectionEnrollments
+            .Where(e => e.SectionId == sectionId)
+            .Select(e => e.Student)
+            .OrderBy(s => s.FullName)
+            .ToListAsync();
+
+        var attendanceRecords = await db.AttendanceRecords
+            .Where(r => r.ClassSession.TimetableSlot.SectionId == sectionId)
+            .Select(r => new { r.StudentId, r.Status })
+            .ToListAsync();
+
+        var studentAttendance = students.Select(s =>
+        {
+            var records = attendanceRecords.Where(r => r.StudentId == s.Id).ToList();
+            var percentage = records.Count == 0
+                ? (decimal?)null
+                : 100m * records.Count(r => r.Status == AttendanceStatus.Present) / records.Count;
+            return new StudentAttendanceDto(s.Id, s.FullName, percentage);
+        }).ToList();
+
+        var overallAttendance = attendanceRecords.Count == 0
+            ? (decimal?)null
+            : 100m * attendanceRecords.Count(r => r.Status == AttendanceStatus.Present) / attendanceRecords.Count;
+
+        var marksBySubject = new List<SubjectMarksSummaryDto>();
+        foreach (var subjectId in taughtSubjectIds)
+        {
+            var subject = await db.Subjects.FindAsync(subjectId);
+            if (subject is null)
+            {
+                continue;
+            }
+            var marks = await db.InternalMarks
+                .Where(m => m.SubjectId == subjectId && students.Select(s => s.Id).Contains(m.StudentId))
+                .Select(m => m.Marks)
+                .ToListAsync();
+            marksBySubject.Add(new SubjectMarksSummaryDto(
+                subjectId, subject.Name,
+                marks.Count == 0 ? null : marks.Average(),
+                marks.Count));
+        }
+
+        return Ok(new SectionPerformanceSummaryDto(sectionId, section.Name, overallAttendance, studentAttendance, marksBySubject));
+    }
+
     // SDA-12 — the Student Desktop App calls this whenever it loses effective focus or is
     // closed. The check for "is there actually a class session happening right now" lives
     // entirely server-side (ClassSessionLookup); the client doesn't need its own timetable
