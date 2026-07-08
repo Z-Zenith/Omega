@@ -49,6 +49,12 @@ services:
     environment:
       ConnectionStrings__Campus: "Host=postgres;Port=5432;Database=campus;Username=campus;Password=campus_dev"
       AiServices__BaseUrl: "http://ai-services:8000"
+      # AIS-02: Copyleaks credentials — sourced from the host/CI environment (or a
+      # gitignored .env file), never hardcoded here. Left unset, backend-api's
+      # plagiarism-check endpoint fails closed with a 503 rather than crashing.
+      Copyleaks__Email: "${COPYLEAKS_EMAIL:-}"
+      Copyleaks__ApiKey: "${COPYLEAKS_API_KEY:-}"
+      Copyleaks__WebhookSecret: "${COPYLEAKS_WEBHOOK_SECRET:-}"
     ports:
       - "8080:8080"
     depends_on:

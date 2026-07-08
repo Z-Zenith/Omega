@@ -356,7 +356,9 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 |---|---|---|
 | POST | `/assignments` | TWA-07 |
 | POST | `/assignments/{id}/submissions` | SDA-10, SDA-11 |
-| GET | `/submissions/{id}/plagiarism-report` | AIS-02 (not yet implemented — needs Copyleaks credentials) |
+| POST | `/submissions/{id}/plagiarism-check` | AIS-02 — kicks off an async Copyleaks scan; new route (the original stub was a single GET). Returns 503 if Copyleaks credentials aren't configured for this deployment. |
+| GET | `/submissions/{id}/plagiarism-report` | AIS-02 — reads whatever's persisted; returns `{ status: "pending" }` until the Copyleaks webhook below delivers a result |
+| POST | `/webhooks/copyleaks/{scanId}/{status}?secret=` | AIS-02 — Copyleaks' async scan-completion callback (unauthenticated by necessity; `secret` must match `Copyleaks:WebhookSecret`) |
 | POST | `/assignments/{id}/copy-check` | AIS-03 — was GET in the original stub; changed to POST since it triggers a fresh analysis and persists `copy_check_flags` rows, not just a fetch |
 | GET | `/submissions/{id}/ai-detection` | AIS-05 (not yet implemented — needs Pangram credentials) |
 | POST | `/submissions/{id}/autograde-suggestion` | AIS-04 — was a parameterless GET in the original stub; changed to POST carrying the rubric (no `Rubric` table exists, so the caller supplies it ad hoc) |
