@@ -3,17 +3,11 @@ name: Student Desktop CI
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "apps/student-desktop/**"
-      - ".github/workflows/student-desktop-ci.yml"
   push:
     branches: [main]
-    paths:
-      - "apps/student-desktop/**"
-      - ".github/workflows/student-desktop-ci.yml"
 
 jobs:
-  build:
+  student-desktop-build:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,3 +27,12 @@ jobs:
 
       - name: Test
         run: dotnet test StudentDesktop.Tests -c Release
+
+      - name: Check for vulnerable NuGet packages
+        run: |
+          set -o pipefail
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee vuln.log
+          if grep -q "has the following vulnerable packages" vuln.log; then
+            echo "::error::Vulnerable NuGet package(s) detected"
+            exit 1
+          fi

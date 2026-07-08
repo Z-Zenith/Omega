@@ -1,6 +1,5 @@
 /**
  * SEK-01 — Code editor public surface.
- * The component implementation lives in a later PR; this PR ships the interface only.
  */
 export type {
   Language,
@@ -11,3 +10,5 @@ export type {
 } from './types.js';
 
 export { LANGUAGE_LABELS } from './types.js';
+export { CodeEditor } from './CodeEditor.js';
+export { isSupportedLanguage, unsupportedLanguageError } from './logic.js';
