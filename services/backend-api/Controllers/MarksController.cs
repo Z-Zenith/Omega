@@ -15,9 +15,123 @@ public class MarksController(AppDbContext db, IPermissionService permissions) : 
 {
     private const string AddExternalMarksPermission = "add_external_marks";
 
-    // TWA-16
+    // TWA-16. Internal marks are direct-publish (no approval gate, unlike TWA-17/TWA-20) —
+    // publishing just requires the teacher's own explicit action via the Publish flag.
     [HttpPost("internal")]
-    public IActionResult CreateInternal() => StatusCode(501, new { feature = "TWA-16", status = "not_implemented" });
+    [Authorize]
+    public async Task<ActionResult<InternalMarkRecordDto>> CreateInternal(CreateInternalMarkRequest request)
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "add_internal_marks"))
+        {
+            return Forbid();
+        }
+
+        if (request.Marks < 0)
+        {
+            return BadRequest(new { error = "invalid_marks", message = "Marks must not be negative." });
+        }
+
+        // Scope to the caller's own section/subject: the teacher must be assigned to teach
+        // this subject to a section the student is actually enrolled in.
+        var teacherSectionIds = await db.TeacherSectionAssignments
+            .Where(a => a.TeacherId == userId && a.SubjectId == request.SubjectId)
+            .Select(a => a.SectionId)
+            .ToListAsync();
+        if (teacherSectionIds.Count == 0)
+        {
+            return Forbid();
+        }
+
+        var studentEnrolled = await db.SectionEnrollments
+            .AnyAsync(e => e.StudentId == request.StudentId && teacherSectionIds.Contains(e.SectionId));
+        if (!studentEnrolled)
+        {
+            return Forbid();
+        }
+
+        if (request.AssignmentId is { } assignmentId)
+        {
+            var assignment = await db.Assignments.FindAsync(assignmentId);
+            if (assignment is null || assignment.SubjectId != request.SubjectId)
+            {
+                return BadRequest(new { error = "invalid_assignment", message = "Assignment does not belong to this subject." });
+            }
+        }
+
+        // Upsert: re-submitting for the same student/subject/assignment updates the existing
+        // row instead of creating a duplicate. An already-published mark's Published state is
+        // never cleared by a Publish=false request — only an explicit publish action changes it.
+        var mark = await db.InternalMarks.FirstOrDefaultAsync(m =>
+            m.StudentId == request.StudentId &&
+            m.SubjectId == request.SubjectId &&
+            m.AssignmentId == request.AssignmentId);
+
+        if (mark is null)
+        {
+            mark = new Data.Entities.InternalMark
+            {
+                Id = Guid.NewGuid(),
+                StudentId = request.StudentId,
+                SubjectId = request.SubjectId,
+                AssignmentId = request.AssignmentId,
+            };
+            db.InternalMarks.Add(mark);
+        }
+
+        mark.Marks = request.Marks;
+        if (request.Publish)
+        {
+            mark.Published = true;
+            mark.PublishedAt = DateTime.UtcNow;
+            mark.PublishedBy = userId;
+        }
+
+        await db.SaveChangesAsync();
+
+        return Ok(new InternalMarkRecordDto(mark.Id, mark.StudentId, mark.SubjectId, mark.AssignmentId, mark.Marks, mark.Published, mark.PublishedAt));
+    }
+
+    // TWA-16 support endpoint — lets the marks-entry screen list the students the caller
+    // may actually enter marks for, instead of requiring student ids to be typed blind.
+    [HttpGet("internal/roster")]
+    [Authorize]
+    public async Task<ActionResult<List<InternalMarksRosterEntryDto>>> InternalRoster([FromQuery] Guid subjectId, [FromQuery] Guid? assignmentId)
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "add_internal_marks"))
+        {
+            return Forbid();
+        }
+
+        var teacherSectionIds = await db.TeacherSectionAssignments
+            .Where(a => a.TeacherId == userId && a.SubjectId == subjectId)
+            .Select(a => a.SectionId)
+            .ToListAsync();
+        if (teacherSectionIds.Count == 0)
+        {
+            return Forbid();
+        }
+
+        var students = await db.SectionEnrollments
+            .Where(e => teacherSectionIds.Contains(e.SectionId))
+            .Select(e => e.Student)
+            .Distinct()
+            .OrderBy(s => s.FullName)
+            .ToListAsync();
+
+        var existingMarks = await db.InternalMarks
+            .Where(m => m.SubjectId == subjectId && m.AssignmentId == assignmentId)
+            .ToListAsync();
+        var marksByStudent = existingMarks.ToDictionary(m => m.StudentId);
+
+        var roster = students.Select(s => marksByStudent.TryGetValue(s.Id, out var mark)
+                ? new InternalMarksRosterEntryDto(s.Id, s.FullName, mark.Marks, mark.Published, mark.PublishedAt)
+                : new InternalMarksRosterEntryDto(s.Id, s.FullName, null, false, null))
+            .ToList();
+
+        return Ok(roster);
+    }
 
     // TWA-17. Gated by an active, non-expired add_external_marks PermissionGrant — this
     // permission has no role-default bundle (see db/init/02_seed_roles_and_permissions.sql),
@@ -99,9 +213,25 @@ public class MarksController(AppDbContext db, IPermissionService permissions) : 
     [HttpPost("external/{id}/approve")]
     public IActionResult ApproveExternal(Guid id) => StatusCode(501, new { feature = "TWA-20", status = "not_implemented" });
 
-    // SDA-15
+    // SDA-15 — published marks only, mirrors PRT-02's filtering logic scoped to the logged-in student.
     [HttpGet("mine")]
-    public IActionResult Mine() => StatusCode(501, new { feature = "SDA-15", status = "not_implemented" });
+    [Authorize]
+    public async Task<ActionResult<MyMarksResponse>> Mine()
+    {
+        var studentId = CurrentUserId();
+
+        var internalMarks = await db.InternalMarks
+            .Where(m => m.StudentId == studentId && m.Published)
+            .Select(m => new InternalMarkDto(m.SubjectId, m.Subject.Name, m.Marks, m.PublishedAt))
+            .ToListAsync();
+
+        var externalMarks = await db.ExternalMarks
+            .Where(m => m.StudentId == studentId && m.Published)
+            .Select(m => new ExternalMarkDto(m.SubjectId, m.Subject.Name, m.Grade, m.ApprovedAt))
+            .ToListAsync();
+
+        return Ok(new MyMarksResponse(internalMarks, externalMarks));
+    }
 
     // PRT-02 — attendance + published marks only, matching SDA-15's publish rule.
     [HttpGet("ward/{studentId}")]
