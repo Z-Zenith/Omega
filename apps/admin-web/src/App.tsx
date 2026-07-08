@@ -5,6 +5,7 @@ import { listRoleBindings } from '@/lib/api'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { PasswordResetPage } from '@/pages/PasswordResetPage'
 import { RolesPage } from '@/pages/RolesPage'
 import { CreateAccountPage } from '@/pages/CreateAccountPage'
 import { StudentRecordPage } from '@/pages/StudentRecordPage'
@@ -44,6 +45,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         <div className="flex gap-6 text-sm font-medium">
           <Link to="/timetable">Timetable</Link>
           <Link to="/events">Events</Link>
+          <Link to="/password-reset">Password Reset</Link>
           {canManageRoles && <Link to="/roles">Roles & Permissions</Link>}
           <Link to="/accounts/new">Create account</Link>
           <Link to="/students">Student Records</Link>
@@ -81,6 +83,16 @@ function App() {
             <RequireAuth>
               <Shell>
                 <EventsPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/password-reset"
+          element={
+            <RequireAuth>
+              <Shell>
+                <PasswordResetPage />
               </Shell>
             </RequireAuth>
           }
