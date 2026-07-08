@@ -159,6 +159,7 @@ public class FeesController(AppDbContext db, IPermissionService permissions) : C
                 {
                     Id = Guid.NewGuid(),
                     RecipientId = parentId,
+                    Type = NotificationType.FeeReminder,
                     Payload = payload,
                     CreatedAt = DateTime.UtcNow,
                 });

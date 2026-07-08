@@ -264,7 +264,8 @@ public class FeesControllerTests
         var response = Assert.IsType<SendFeeRemindersResponse>(ok.Value);
         Assert.Equal(1, response.FeesDueSoon);
         Assert.Equal(parent.Id, Assert.Single(response.NotifiedParentIds));
-        Assert.Single(await db.Notifications.Where(n => n.RecipientId == parent.Id).ToListAsync());
+        var notification = Assert.Single(await db.Notifications.Where(n => n.RecipientId == parent.Id).ToListAsync());
+        Assert.Equal(NotificationType.FeeReminder, notification.Type);
     }
 
     [Fact]
