@@ -71,6 +71,16 @@ public class ApiClient
             ?? new MyMarksResponse([], []);
     }
 
+    // SDA-10: manual submission. The backend flags late submissions and rejects a
+    // format mismatch (e.g. a quiz submitted as a file upload) — this just forwards.
+    public async Task<SubmissionDto> SubmitAssignmentAsync(Guid assignmentId, string contentUrl, string submissionFormat)
+    {
+        var response = await SendAsync(HttpMethod.Post, $"/api/v1/assignments/{assignmentId}/submissions",
+            new SubmitAssignmentRequest(contentUrl, submissionFormat));
+        return await response.Content.ReadFromJsonAsync<SubmissionDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty submission response");
+    }
+
     // SDA-11: called by AssignmentAutoSubmitService when the app detects exit or
     // focus-loss during an active assignment window.
     public async Task<SubmissionDto> AutoSubmitAssignmentAsync(Guid assignmentId, string contentUrl, string submissionFormat)
