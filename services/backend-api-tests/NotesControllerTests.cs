@@ -1,0 +1,215 @@
+using System.Security.Claims;
+using BackendApi.Contracts;
+using BackendApi.Controllers;
+using BackendApi.Data;
+using BackendApi.Data.Entities;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace BackendApi.Tests;
+
+public class NotesControllerTests
+{
+    private static AppDbContext NewDb()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        return new AppDbContext(options);
+    }
+
+    private static User NewUser(AccountType accountType) => new()
+    {
+        Id = Guid.NewGuid(),
+        CollegeId = Guid.NewGuid(),
+        Identifier = $"user-{Guid.NewGuid():N}",
+        PasswordHash = "hash",
+        FullName = "Test User",
+        AccountType = accountType,
+        IsActive = true,
+    };
+
+    private static NotesController ControllerAs(AppDbContext db, User user)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
+        return new NotesController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = principal },
+            },
+        };
+    }
+
+    // SDA-08: read-modify-write for the "append to existing note" clip flow needs the
+    // full current content, not just the summary (title/updatedAt) Mine() returns.
+    [Fact]
+    public async Task Sda08_GetById_ReturnsFullNoteContent_ForOwner()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var note = new Note
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = student.Id,
+            Title = "Biology notes",
+            ContentMarkdown = "Existing content.",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(student);
+        db.Notes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.GetById(note.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<NoteDto>(ok.Value);
+        Assert.Equal("Existing content.", dto.ContentMarkdown);
+    }
+
+    // SDA-08
+    [Fact]
+    public async Task Sda08_GetById_ForbidsReadingAnotherUsersNote()
+    {
+        await using var db = NewDb();
+        var owner = NewUser(AccountType.Student);
+        var otherStudent = NewUser(AccountType.Student);
+        var note = new Note
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = owner.Id,
+            Title = "Private notes",
+            ContentMarkdown = "Secret.",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(owner, otherStudent);
+        db.Notes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherStudent);
+        var result = await controller.GetById(note.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    // SDA-08
+    [Fact]
+    public async Task Sda08_Create_RejectsEmptyTitle()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.Create(new CreateNoteRequest("   ", "content"));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    // SDA-08: acceptance-critical — clipped content is saved as a new note.
+    [Fact]
+    public async Task Sda08_Create_CreatesNoteOwnedByCaller()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.Create(new CreateNoteRequest(
+            "Clipped: Photosynthesis",
+            "> Clipped from [Photosynthesis - Wikipedia](https://en.wikipedia.org/wiki/Photosynthesis)\n\nSome excerpt."));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<NoteDto>(ok.Value);
+        Assert.Equal("Clipped: Photosynthesis", dto.Title);
+        Assert.Contains("https://en.wikipedia.org/wiki/Photosynthesis", dto.ContentMarkdown);
+
+        var stored = await db.Notes.FindAsync(dto.Id);
+        Assert.NotNull(stored);
+        Assert.Equal(student.Id, stored!.OwnerId);
+    }
+
+    // SDA-08: acceptance-critical — clipped content can be appended to an existing note.
+    [Fact]
+    public async Task Sda08_Update_AppendsClippedContentToExistingNote_RetainingSourceUrl()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var note = new Note
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = student.Id,
+            Title = "Biology notes",
+            ContentMarkdown = "Existing content.",
+            CreatedAt = DateTime.UtcNow.AddDays(-1),
+            UpdatedAt = DateTime.UtcNow.AddDays(-1),
+        };
+        db.Users.Add(student);
+        db.Notes.Add(note);
+        await db.SaveChangesAsync();
+
+        var appended = note.ContentMarkdown + "\n\n> Clipped from [Photosynthesis - Wikipedia](https://en.wikipedia.org/wiki/Photosynthesis)\n\nSome excerpt.";
+        var controller = ControllerAs(db, student);
+        var result = await controller.Update(note.Id, new UpdateNoteRequest(note.Title, appended));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<NoteDto>(ok.Value);
+        Assert.Contains("Existing content.", dto.ContentMarkdown);
+        Assert.Contains("https://en.wikipedia.org/wiki/Photosynthesis", dto.ContentMarkdown);
+    }
+
+    // SDA-08
+    [Fact]
+    public async Task Sda08_Update_ForbidsUpdatingAnotherUsersNote()
+    {
+        await using var db = NewDb();
+        var owner = NewUser(AccountType.Student);
+        var otherStudent = NewUser(AccountType.Student);
+        var note = new Note
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = owner.Id,
+            Title = "Private notes",
+            ContentMarkdown = "Secret.",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(owner, otherStudent);
+        db.Notes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherStudent);
+        var result = await controller.Update(note.Id, new UpdateNoteRequest("Hijacked", "Hijacked content"));
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    // SDA-08
+    [Fact]
+    public async Task Sda08_Mine_OnlyReturnsCallersOwnNotes()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var otherStudent = NewUser(AccountType.Student);
+        db.Users.AddRange(student, otherStudent);
+        db.Notes.AddRange(
+            new Note { Id = Guid.NewGuid(), OwnerId = student.Id, Title = "Mine", ContentMarkdown = "x", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new Note { Id = Guid.NewGuid(), OwnerId = otherStudent.Id, Title = "Not mine", ContentMarkdown = "y", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.Mine();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var notes = Assert.IsType<List<NoteSummaryDto>>(ok.Value);
+        var entry = Assert.Single(notes);
+        Assert.Equal("Mine", entry.Title);
+    }
+}

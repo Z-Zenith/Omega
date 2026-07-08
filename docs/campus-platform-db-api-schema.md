@@ -370,6 +370,14 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | GET | `/marks/mine` | SDA-15 |
 | GET | `/marks/ward/{studentId}` | PRT-02 |
 
+### Notes
+| Method | Path | Feature |
+|---|---|---|
+| GET | `/notes/mine` | SDA-08 |
+| GET | `/notes/{id}` | SDA-08 |
+| POST | `/notes` | SDA-08 |
+| PATCH | `/notes/{id}` | SDA-08 |
+
 ### Community
 | Method | Path | Feature |
 |---|---|---|
