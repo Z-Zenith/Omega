@@ -216,6 +216,47 @@ export function submitInternalMark(mark: {
   })
 }
 
+// TWA-05 — community groups: create a group, list the groups you belong to, and
+// view/post within one. Backend: services/backend-api/Controllers/CommunityController.cs.
+export type GroupType = 'SubjectSection' | 'Club' | 'TeacherOnly'
+
+export interface GroupDto {
+  id: string
+  name: string
+  type: string
+  sectionId: string | null
+}
+
+export interface GroupPostDto {
+  id: string
+  groupId: string
+  authorId: string
+  content: string
+  createdAt: string
+}
+
+export function createGroup(group: { name: string; type: GroupType; sectionId: string | null }) {
+  return request<GroupDto>('/groups', {
+    method: 'POST',
+    body: JSON.stringify(group),
+  })
+}
+
+export function listMyGroups() {
+  return request<{ groups: GroupDto[] }>('/groups/mine')
+}
+
+export function listGroupPosts(groupId: string) {
+  return request<GroupPostDto[]>(`/groups/${groupId}/posts`)
+}
+
+export function createGroupPost(groupId: string, content: string) {
+  return request<GroupPostDto>(`/groups/${groupId}/posts`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  })
+}
+
 // DMS-01 / TWA-18 — thin adapters from the shared Direct Messaging package's
 // embedder callbacks (Result<T, DmsError>) onto this app's fetch client
 // (which throws ApiError). DMS owns no persistence or auth of its own; this
