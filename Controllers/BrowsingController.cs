@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using BackendApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +15,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class BrowsingController(AppDbContext db) : ControllerBase
+public class BrowsingController(AppDbContext db, IAiServicesClient aiServices) : ControllerBase
 {
     // SDA-03: whitelist_sites is college-scoped (not per-class) — this is the already-
     // decided design that SDA-04's "approval applies institution-wide" acceptance
@@ -170,6 +172,107 @@ public class BrowsingController(AppDbContext db) : ControllerBase
             whitelistRequest.Id,
             whitelistRequest.Status.ToString(),
             new WhitelistSiteDto(site!.Id, site.Url, site.ApprovedAt)));
+    }
+
+    [HttpGet("students/{id}/browsing-summary")]
+    public IActionResult BrowsingSummary(Guid id) => StatusCode(501, new { feature = "AIS-01", status = "not_implemented" });
+
+    // SDA-25 (Track 1) — telemetry ingestion isn't this endpoint's/track's job; AIS-07
+    // below only reads whatever usage_telemetry rows already exist.
+    [HttpPost("telemetry")]
+    public IActionResult PostTelemetry() => StatusCode(501, new { feature = "SDA-25", status = "not_implemented" });
+
+    // AIS-07: analyzes usage-pattern telemetry (SDA-25 writes it) for one class session
+    // or assignment window via the self-hosted anomaly classifier. "Never shown to the
+    // student" (acceptance criterion) is enforced by requiring a teacher/admin caller,
+    // not by hiding an otherwise-reachable route. Re-analyzing replaces any previous
+    // flags for the same window rather than accumulating stale ones.
+    // Changed from the original stub's parameterless GET to a POST scoped by query
+    // param: this triggers a fresh analysis and writes rows, and needs a window to
+    // scope to — a bare GET with no params could never have returned anything meaningful.
+    [HttpPost("suspicious-flags")]
+    public async Task<ActionResult<List<SuspiciousFlagReportDto>>> SuspiciousFlags(
+        [FromQuery] Guid? classSessionId, [FromQuery] Guid? assignmentId)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (caller.AccountType is not (AccountType.Teacher or AccountType.AdminTier))
+        {
+            return Forbid();
+        }
+        if (classSessionId is null == assignmentId is null)
+        {
+            return BadRequest(new { error = "scope_required", message = "Exactly one of classSessionId or assignmentId is required." });
+        }
+
+        Guid scopeTeacherId;
+        if (classSessionId is { } activeClassSessionId)
+        {
+            var session = await db.ClassSessions.Include(s => s.TimetableSlot).FirstOrDefaultAsync(s => s.Id == activeClassSessionId);
+            if (session is null)
+            {
+                return NotFound();
+            }
+            scopeTeacherId = session.ActualTeacherId ?? session.TimetableSlot.TeacherId;
+        }
+        else
+        {
+            var assignment = await db.Assignments.FindAsync(assignmentId!.Value);
+            if (assignment is null)
+            {
+                return NotFound();
+            }
+            scopeTeacherId = assignment.TeacherId;
+        }
+        if (caller.AccountType is not AccountType.AdminTier && scopeTeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        var telemetry = await db.UsageTelemetries
+            .Where(t => (classSessionId != null && t.ClassSessionId == classSessionId)
+                || (assignmentId != null && t.AssignmentId == assignmentId))
+            .ToListAsync();
+
+        var existingFlags = await db.SuspiciousFlags
+            .Where(f => (classSessionId != null && f.ClassSessionId == classSessionId)
+                || (assignmentId != null && f.AssignmentId == assignmentId))
+            .ToListAsync();
+        db.SuspiciousFlags.RemoveRange(existingFlags);
+
+        if (telemetry.Count == 0)
+        {
+            await db.SaveChangesAsync();
+            return Ok(new List<SuspiciousFlagReportDto>());
+        }
+
+        var events = telemetry.Select(t => new TelemetryEventInput(
+            t.StudentId.ToString(),
+            t.ClassSessionId?.ToString(),
+            t.AssignmentId?.ToString(),
+            t.EventType,
+            JsonSerializer.Deserialize<object>(t.Metadata) ?? new { },
+            t.RecordedAt)).ToList();
+
+        var results = await aiServices.CheckSuspiciousBehaviourAsync(events, minConfidence: 0.70);
+
+        var now = DateTime.UtcNow;
+        var flags = results.Select(r => new SuspiciousFlag
+        {
+            Id = Guid.NewGuid(),
+            StudentId = Guid.Parse(r.StudentId),
+            ClassSessionId = r.ClassSessionId is { } flaggedClassSessionId ? Guid.Parse(flaggedClassSessionId) : null,
+            AssignmentId = r.AssignmentId is { } flaggedAssignmentId ? Guid.Parse(flaggedAssignmentId) : null,
+            ConfidenceScore = (decimal)r.ConfidenceScore,
+            FlaggedAt = now,
+        }).ToList();
+        db.SuspiciousFlags.AddRange(flags);
+        await db.SaveChangesAsync();
+
+        return Ok(flags.Select(f => new SuspiciousFlagReportDto(f.Id, f.ConfidenceScore, f.FlaggedAt, f.AssignmentId, f.ClassSessionId)).ToList());
     }
 
     private static WhitelistRequestDto ToDto(WhitelistRequest r) =>
