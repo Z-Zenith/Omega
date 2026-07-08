@@ -50,7 +50,7 @@
             </ComboBox>
             <TextBlock Text="Comments (optional)"/>
             <TextBox Text="{Binding FeedbackComments}" AcceptsReturn="True" TextWrapping="Wrap" Height="100"/>
-            <Button Content="Submit feedback" Command="{Binding SubmitFeedbackCommand}"/>
+            <Button Content="Submit feedback" Command="{Binding SubmitFeedbackCommand}" IsEnabled="{Binding !IsBusy}"/>
             <TextBlock Text="{Binding FeedbackMessage}" Foreground="Green"
                        IsVisible="{Binding FeedbackMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
         </StackPanel>

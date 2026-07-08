@@ -257,6 +257,37 @@ public class CommunityControllerTests
         Assert.Equal(teacher.FullName, course.TeacherName);
     }
 
+    // SDA-18: acceptance-critical — "every enrolled subject has a non-empty ...
+    // teacher-info entry", even when Subject.TeacherId was never set directly. Falls back
+    // to a TeacherSectionAssignment row for one of the caller's enrolled sections.
+    [Fact]
+    public async Task Sda18_MySubjects_FallsBackToTeacherSectionAssignment_WhenSubjectTeacherIdIsNull()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher);
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "CS" };
+        var section = new Section { Id = Guid.NewGuid(), DepartmentId = department.Id, Year = 3, Name = "3rd Year CSE - A" };
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS301", Name = "Operating Systems" };
+        db.Users.AddRange(student, teacher);
+        db.Departments.Add(department);
+        db.Sections.Add(section);
+        db.Subjects.Add(subject);
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student.Id });
+        db.TimetableSlots.Add(new TimetableSlot { Id = Guid.NewGuid(), SectionId = section.Id, SubjectId = subject.Id, TeacherId = teacher.Id, DayOfWeek = 1, StartTime = new TimeOnly(9, 0), EndTime = new TimeOnly(10, 0) });
+        db.TeacherSectionAssignments.Add(new TeacherSectionAssignment { Id = Guid.NewGuid(), TeacherId = teacher.Id, SectionId = section.Id, SubjectId = subject.Id });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.MySubjects();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var courses = Assert.IsType<List<CourseInfoDto>>(ok.Value);
+        var course = Assert.Single(courses);
+        Assert.Equal(teacher.Id, course.TeacherId);
+        Assert.Equal(teacher.FullName, course.TeacherName);
+    }
+
     // SDA-17: "feedback is attributable to the course/teacher it was submitted against".
     [Fact]
     public async Task Sda17_SubmitTeacherFeedback_ForbidsNonStudents()

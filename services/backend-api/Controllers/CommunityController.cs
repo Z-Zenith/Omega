@@ -217,10 +217,37 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
             .Distinct()
             .ToListAsync();
 
-        var courses = await db.Subjects
-            .Where(s => subjectIds.Contains(s.Id))
-            .Select(s => new CourseInfoDto(s.Id, s.Code, s.Name, s.TeacherId, s.Teacher != null ? s.Teacher.FullName : null))
+        // Subject.TeacherId is nullable — a subject can be created/timetabled before it's
+        // directly assigned a teacher. When that's the case, fall back to a
+        // TeacherSectionAssignment row for one of the caller's enrolled sections so the
+        // acceptance criterion ("every course has teacher info") still holds instead of
+        // surfacing TeacherName: null.
+        var fallbackTeachersBySubject = await db.TeacherSectionAssignments
+            .Where(a => sectionIds.Contains(a.SectionId) && subjectIds.Contains(a.SubjectId))
+            .Select(a => new { a.SubjectId, a.TeacherId, TeacherName = a.Teacher.FullName })
             .ToListAsync();
+        var fallbackBySubjectId = fallbackTeachersBySubject
+            .GroupBy(a => a.SubjectId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var subjects = await db.Subjects
+            .Where(s => subjectIds.Contains(s.Id))
+            .Select(s => new { s.Id, s.Code, s.Name, s.TeacherId, TeacherName = s.Teacher != null ? s.Teacher.FullName : null })
+            .ToListAsync();
+
+        var courses = subjects
+            .Select(s =>
+            {
+                if (s.TeacherId is not null)
+                {
+                    return new CourseInfoDto(s.Id, s.Code, s.Name, s.TeacherId, s.TeacherName);
+                }
+
+                return fallbackBySubjectId.TryGetValue(s.Id, out var fallback)
+                    ? new CourseInfoDto(s.Id, s.Code, s.Name, fallback.TeacherId, fallback.TeacherName)
+                    : new CourseInfoDto(s.Id, s.Code, s.Name, null, null);
+            })
+            .ToList();
 
         return Ok(courses);
     }

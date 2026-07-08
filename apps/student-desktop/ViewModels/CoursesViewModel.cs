@@ -24,14 +24,24 @@ public partial class CoursesViewModel : ViewModelBase
     [ObservableProperty]
     private CourseInfoDto? _selectedCourse;
 
+    // No default (0 = unset) — defaulting to 5 would bias any unattended/accidental
+    // submission toward the highest possible rating. The student must deliberately pick
+    // one of 1-5; SubmitFeedbackAsync's existing range check rejects 0.
     [ObservableProperty]
-    private int _feedbackRating = 5;
+    private int _feedbackRating;
 
     [ObservableProperty]
     private string _feedbackComments = "";
 
     [ObservableProperty]
     private string? _feedbackMessage;
+
+    // Gates SubmitFeedbackCommand (see CanSubmitFeedback below) — teacher_feedback has no
+    // unique constraint, so without this guard a double-click (or a click that lands
+    // before the button visually disables) creates duplicate feedback rows.
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SubmitFeedbackCommand))]
+    private bool _isBusy;
 
     public CoursesViewModel(ApiClient apiClient)
     {
@@ -61,7 +71,9 @@ public partial class CoursesViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
+    private bool CanSubmitFeedback() => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanSubmitFeedback))]
     private async Task SubmitFeedbackAsync()
     {
         FeedbackMessage = null;
@@ -76,10 +88,14 @@ public partial class CoursesViewModel : ViewModelBase
             return;
         }
 
+        IsBusy = true;
         try
         {
             await _apiClient.SubmitTeacherFeedbackAsync(teacherId, FeedbackRating, string.IsNullOrWhiteSpace(FeedbackComments) ? null : FeedbackComments.Trim());
             FeedbackMessage = "Feedback submitted.";
+            // Reset so a subsequent click submits a deliberate new choice rather than
+            // silently repeating the same rating.
+            FeedbackRating = 0;
             FeedbackComments = "";
         }
         catch (ApiException ex)
@@ -89,6 +105,10 @@ public partial class CoursesViewModel : ViewModelBase
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             ErrorMessage = "Could not reach the server. Check your connection and try again.";
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 }
