@@ -55,6 +55,8 @@ services:
       Copyleaks__Email: "${COPYLEAKS_EMAIL:-}"
       Copyleaks__ApiKey: "${COPYLEAKS_API_KEY:-}"
       Copyleaks__WebhookSecret: "${COPYLEAKS_WEBHOOK_SECRET:-}"
+      # AIS-05: Pangram credential, same sourcing rule as Copyleaks above.
+      Pangram__ApiKey: "${PANGRAM_API_KEY:-}"
     ports:
       - "8080:8080"
     depends_on:
