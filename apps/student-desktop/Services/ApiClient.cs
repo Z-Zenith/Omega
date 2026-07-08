@@ -130,6 +130,26 @@ public class ApiClient
         return await response.Content.ReadFromJsonAsync<List<NoteDto>>(JsonOptions) ?? [];
     }
 
+    // SDA-24, DMS-01
+    public async Task<List<DmsThreadSummaryDto>> GetMessageThreadsAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/messages/threads");
+        return await response.Content.ReadFromJsonAsync<List<DmsThreadSummaryDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<List<DmsMessageDto>> GetThreadMessagesAsync(Guid threadId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/messages/threads/{threadId}/messages");
+        return await response.Content.ReadFromJsonAsync<List<DmsMessageDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<DmsMessageDto> SendMessageAsync(Guid threadId, string content)
+    {
+        var response = await SendAsync(HttpMethod.Post, $"/api/v1/messages/threads/{threadId}/messages", new SendMessageRequest(content));
+        return await response.Content.ReadFromJsonAsync<DmsMessageDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty message response");
+    }
+
     public async Task LogoutAsync()
     {
         if (Token is null)

@@ -21,6 +21,7 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
     public MarksViewModel MarksViewModel { get; }
     public BrowserViewModel BrowserViewModel { get; }
     public NotesViewModel NotesViewModel { get; }
+    public MessagesViewModel MessagesViewModel { get; }
 
     // SDA-01: owned for the lifetime of the signed-in session. Started here so the
     // class-time lock is active as soon as the student is logged in, and stopped/
@@ -41,6 +42,7 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
         MarksViewModel = new MarksViewModel(apiClient);
         BrowserViewModel = new BrowserViewModel(apiClient);
         NotesViewModel = new NotesViewModel(apiClient, userId);
+        MessagesViewModel = new MessagesViewModel(apiClient, userId);
         _currentPage = CalendarViewModel;
 
         ClassLockService = new ClassLockService(apiClient);
@@ -64,6 +66,9 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
 
     [RelayCommand]
     private void ShowNotes() => CurrentPage = NotesViewModel;
+
+    [RelayCommand]
+    private void ShowMessages() => CurrentPage = MessagesViewModel;
 
     [RelayCommand]
     private async Task SignOutAsync()

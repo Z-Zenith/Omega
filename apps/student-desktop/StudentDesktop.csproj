@@ -48,4 +48,14 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- SDA-24: DMS-01's MessageInbox/MessageThreadView are React/TypeScript, same
+       embedding approach as SDA-19's SEK integration above. Requires
+       `npm run build:host` in packages/direct-messaging to have run first. -->
+  <ItemGroup>
+    <Content Include="..\..\packages\direct-messaging\dist\host\**">
+      <Link>DmsHost\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>
