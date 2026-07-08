@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes, Link } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/lib/auth'
-import { ActiveSectionProvider } from '@/lib/activeSection'
+import { ActiveSectionProvider, useActiveSection } from '@/lib/activeSection'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
@@ -13,6 +13,39 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
   if (!token) return <Navigate to="/login" replace />
   return children
+}
+
+// TWA-02: global section switcher — lets the teacher pick any assigned section, taking
+// precedence over TWA-01's auto-computed one, and reverts on "Auto" so consumers of
+// useActiveSection() (dashboard/attendance/materials) update immediately either way.
+function SectionSwitcher() {
+  const { sectionId, sectionName, isManualOverride, assignedSections, selectSection, clearManualSelection } =
+    useActiveSection()
+
+  if (assignedSections.length === 0) return null
+
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <label className="text-muted-foreground">Section:</label>
+      <select
+        className="rounded-md border px-2 py-1 text-sm"
+        value={sectionId ?? ''}
+        onChange={(e) => (e.target.value ? selectSection(e.target.value) : clearManualSelection())}
+      >
+        <option value="">— none —</option>
+        {assignedSections.map((section) => (
+          <option key={section.sectionId} value={section.sectionId}>
+            {section.sectionName}
+          </option>
+        ))}
+      </select>
+      {isManualOverride && (
+        <button onClick={clearManualSelection} className="underline">
+          Auto ({sectionName ? 'switch back' : 'clear'})
+        </button>
+      )}
+    </div>
+  )
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -28,11 +61,14 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/approve-marks">Approve Marks</Link>
           <Link to="/messages">Messages</Link>
         </div>
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <span>{fullName}</span>
-          <button onClick={() => setSession(null)} className="underline">
-            Sign out
-          </button>
+        <div className="flex items-center gap-4">
+          <SectionSwitcher />
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>{fullName}</span>
+            <button onClick={() => setSession(null)} className="underline">
+              Sign out
+            </button>
+          </div>
         </div>
       </nav>
       {children}

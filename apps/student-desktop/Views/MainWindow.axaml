@@ -16,6 +16,22 @@
         <vm:MainWindowViewModel/>
     </Design.DataContext>
 
-    <ContentControl Content="{Binding CurrentPage}"/>
+    <Grid>
+        <ContentControl Content="{Binding CurrentPage}"/>
+
+        <!-- SDA-22: transient notice shown when a clipboard action is blocked because an
+             assignment is currently open for editing. -->
+        <Border x:Name="ClipboardBlockedNotice"
+                IsVisible="False"
+                Background="#CC1F1F1F"
+                CornerRadius="6"
+                Padding="12,8"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,24">
+            <TextBlock Text="Copy/cut/paste is disabled while an assignment is open."
+                       Foreground="White"/>
+        </Border>
+    </Grid>
 
 </Window>
