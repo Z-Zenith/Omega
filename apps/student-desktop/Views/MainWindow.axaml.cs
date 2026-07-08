@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -19,6 +20,12 @@ public partial class MainWindow : Window
     private WindowState _preLockWindowState = WindowState.Normal;
 
     private readonly IAppClipboardService _clipboard = AppClipboardService.Instance;
+
+    // SDA-22: set from App.axaml.cs (same lifetime/wiring as AttachTo for auto-submit).
+    // Null before that wiring happens (e.g. design-time), in which case clipboard actions
+    // are never blocked — matches "no assignment open" being the safe default.
+    private AssignmentAutoSubmitService? _autoSubmitService;
+    private CancellationTokenSource? _blockedNoticeHideCts;
 
     public MainWindow()
     {
@@ -41,6 +48,10 @@ public partial class MainWindow : Window
     {
         if (DataContext is MainWindowViewModel viewModel)
         {
+            // SDA-22: same lifetime as the window's DataContext — set once, survives
+            // sign-out/sign-in like AutoSubmitService itself does.
+            _autoSubmitService = viewModel.AutoSubmitService;
+
             viewModel.PropertyChanged += (_, args) =>
             {
                 if (args.PropertyName == nameof(MainWindowViewModel.CurrentPage))
@@ -118,6 +129,12 @@ public partial class MainWindow : Window
         }
     }
 
+    // SDA-22: while an assignment is open for editing, ALL clipboard actions are blocked —
+    // including the isolated in-app clipboard from SDA-21, not just the OS one. Each handler
+    // below checks this first and, if blocked, does nothing but mark the event handled and
+    // show the notice; it never touches _clipboard at all in that case.
+    private bool IsClipboardBlocked => _autoSubmitService?.IsAssignmentOpen == true;
+
     private void OnCopyingToClipboard(object? sender, RoutedEventArgs e)
     {
         // e.Source is the TextBox that originated the event; sender is whatever element this
@@ -125,6 +142,13 @@ public partial class MainWindow : Window
         // bubbles — so the TextBox itself must be read from Source, not sender.
         if (e.Source is TextBox textBox)
         {
+            if (IsClipboardBlocked)
+            {
+                ShowClipboardBlockedNotice();
+                e.Handled = true;
+                return;
+            }
+
             var selection = textBox.SelectedText;
             if (!string.IsNullOrEmpty(selection))
             {
@@ -140,6 +164,13 @@ public partial class MainWindow : Window
     {
         if (e.Source is TextBox textBox)
         {
+            if (IsClipboardBlocked)
+            {
+                ShowClipboardBlockedNotice();
+                e.Handled = true;
+                return;
+            }
+
             var selection = textBox.SelectedText;
             if (!string.IsNullOrEmpty(selection))
             {
@@ -157,6 +188,13 @@ public partial class MainWindow : Window
     {
         if (e.Source is TextBox textBox)
         {
+            if (IsClipboardBlocked)
+            {
+                ShowClipboardBlockedNotice();
+                e.Handled = true;
+                return;
+            }
+
             var text = _clipboard.GetText();
             if (!string.IsNullOrEmpty(text))
             {
@@ -166,6 +204,33 @@ public partial class MainWindow : Window
 
             // Prevent TextBox.Paste() from also reading from the real OS clipboard.
             e.Handled = true;
+        }
+    }
+
+    private void ShowClipboardBlockedNotice()
+    {
+        _blockedNoticeHideCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _blockedNoticeHideCts = cts;
+
+        ClipboardBlockedNotice.IsVisible = true;
+
+        _ = HideNoticeAfterDelayAsync(cts.Token);
+    }
+
+    private async System.Threading.Tasks.Task HideNoticeAfterDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(2), token);
+            if (!token.IsCancellationRequested)
+            {
+                ClipboardBlockedNotice.IsVisible = false;
+            }
+        }
+        catch (System.Threading.Tasks.TaskCanceledException)
+        {
+            // Superseded by a newer blocked attempt — that one owns hiding the notice.
         }
     }
 }

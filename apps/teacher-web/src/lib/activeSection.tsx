@@ -40,11 +40,33 @@ export function computeActiveSlot(slots: TimetableSlotDto[], now: Date): Timetab
   )
 }
 
+export interface AssignedSection {
+  sectionId: string
+  sectionName: string
+}
+
+/** Distinct sections appearing anywhere in the teacher's timetable (TWA-02: switch target list). */
+function computeAssignedSections(slots: TimetableSlotDto[]): AssignedSection[] {
+  const bySectionId = new Map<string, string>()
+  for (const slot of slots) {
+    bySectionId.set(slot.sectionId, slot.sectionName)
+  }
+  return Array.from(bySectionId, ([sectionId, sectionName]) => ({ sectionId, sectionName }))
+}
+
 interface ActiveSectionState {
   /** The full timetable slot currently in session, or null if the teacher isn't in class right now. */
   activeSlot: TimetableSlotDto | null
   sectionId: string | null
   sectionName: string | null
+  /** True when `sectionId` reflects a manual switch (TWA-02) rather than the auto-computed slot. */
+  isManualOverride: boolean
+  /** All sections the teacher is assigned to anywhere in their timetable, for the switcher UI. */
+  assignedSections: AssignedSection[]
+  /** Switch to any assigned section (TWA-02), taking precedence over the auto-computed one. */
+  selectSection: (sectionId: string) => void
+  /** Revert to the auto-computed "currently scheduled" section (TWA-01). */
+  clearManualSelection: () => void
   isLoading: boolean
   isError: boolean
 }
@@ -53,12 +75,14 @@ const ActiveSectionContext = createContext<ActiveSectionState | null>(null)
 
 /**
  * Provides the teacher's "currently scheduled section" (TWA-01), computed live from the
- * TWA-10 timetable endpoint. Must be nested inside AuthProvider — it only fetches once a
- * session exists, and shares the `['timetable', 'mine']` query cache with TimetablePage.
+ * TWA-10 timetable endpoint, with a manual override (TWA-02) that takes precedence until
+ * cleared. Must be nested inside AuthProvider — it only fetches once a session exists, and
+ * shares the `['timetable', 'mine']` query cache with TimetablePage.
  */
 export function ActiveSectionProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth()
   const [now, setNow] = useState(() => new Date())
+  const [manualSectionId, setManualSectionId] = useState<string | null>(null)
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), RECHECK_INTERVAL_MS)
@@ -76,10 +100,26 @@ export function ActiveSectionProvider({ children }: { children: ReactNode }) {
     [timetable.data, now],
   )
 
+  const assignedSections = useMemo(
+    () => (timetable.data ? computeAssignedSections(timetable.data) : []),
+    [timetable.data],
+  )
+
+  const manualSection = manualSectionId
+    ? assignedSections.find((s) => s.sectionId === manualSectionId) ?? null
+    : null
+
+  const sectionId = manualSection?.sectionId ?? activeSlot?.sectionId ?? null
+  const sectionName = manualSection?.sectionName ?? activeSlot?.sectionName ?? null
+
   const value: ActiveSectionState = {
     activeSlot,
-    sectionId: activeSlot?.sectionId ?? null,
-    sectionName: activeSlot?.sectionName ?? null,
+    sectionId,
+    sectionName,
+    isManualOverride: !!manualSection,
+    assignedSections,
+    selectSection: setManualSectionId,
+    clearManualSelection: () => setManualSectionId(null),
     isLoading: timetable.isLoading,
     isError: timetable.isError,
   }
