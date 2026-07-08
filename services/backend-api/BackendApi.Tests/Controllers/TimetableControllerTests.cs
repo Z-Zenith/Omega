@@ -21,6 +21,15 @@ public class TimetableControllerTests
         public Task<Guid?> GetDepartmentScopeAsync(Guid userId) => Task.FromResult<Guid?>(null);
     }
 
+    // SDA-12: no test in this file exercises ExitPing's notification-routing behavior
+    // directly (that's NotificationRouterTests' job) — the controller just needs some
+    // INotificationRouter to construct.
+    private class FakeNotificationRouter : INotificationRouter
+    {
+        public Task<Notification> RouteAsync(Guid recipientId, NotificationType type, object payload, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new Notification { Id = Guid.NewGuid(), RecipientId = recipientId, Type = type });
+    }
+
     private static AppDbContext NewDb()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
@@ -48,7 +57,7 @@ public class TimetableControllerTests
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
-        return new TimetableController(db, new FakePermissionService())
+        return new TimetableController(db, new FakePermissionService(), new FakeNotificationRouter())
         {
             ControllerContext = new ControllerContext
             {
