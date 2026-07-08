@@ -11,11 +11,17 @@ public partial class MainWindowViewModel : ViewModelBase
     // without the view needing its own copy of session/auth state.
     public ApiClient ApiClient => _apiClient;
 
+    // SDA-11: shared across the app's lifetime so it survives sign-out/sign-in and can
+    // be attached once to the main window in App.axaml.cs. No assignment-editing view
+    // calls BeginSession on it yet — see AssignmentAutoSubmitService for details.
+    public AssignmentAutoSubmitService AutoSubmitService { get; }
+
     [ObservableProperty]
     private ViewModelBase _currentPage;
 
     public MainWindowViewModel()
     {
+        AutoSubmitService = new AssignmentAutoSubmitService(_apiClient);
         _currentPage = CreateLoginPage();
     }
 

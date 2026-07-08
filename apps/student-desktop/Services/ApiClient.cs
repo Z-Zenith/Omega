@@ -56,6 +56,31 @@ public class ApiClient
         await SendAsync(HttpMethod.Post, $"/api/v1/events/{eventId}/register");
     }
 
+    // SDA-23: self-service password change requires a fresh, successful TOTP challenge —
+    // the backend rejects the request outright if the code is missing or invalid.
+    public async Task ChangePasswordAsync(string currentPassword, string newPassword, string totpCode)
+    {
+        await SendAsync(HttpMethod.Post, "/api/v1/auth/change-password",
+            new ChangePasswordRequest(currentPassword, newPassword, totpCode));
+    }
+
+    public async Task<MyMarksResponse> GetMyMarksAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/marks/mine");
+        return await response.Content.ReadFromJsonAsync<MyMarksResponse>(JsonOptions)
+            ?? new MyMarksResponse([], []);
+    }
+
+    // SDA-11: called by AssignmentAutoSubmitService when the app detects exit or
+    // focus-loss during an active assignment window.
+    public async Task<SubmissionDto> AutoSubmitAssignmentAsync(Guid assignmentId, string contentUrl, string submissionFormat)
+    {
+        var response = await SendAsync(HttpMethod.Post, $"/api/v1/assignments/{assignmentId}/submissions/auto-submit",
+            new SubmitAssignmentRequest(contentUrl, submissionFormat));
+        return await response.Content.ReadFromJsonAsync<SubmissionDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty auto-submit response");
+    }
+
     public async Task LogoutAsync()
     {
         if (Token is null)
