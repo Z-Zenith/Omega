@@ -81,6 +81,21 @@ public class ApiClient
             ?? throw new ApiException(500, "Empty auto-submit response");
     }
 
+    // SDA-18
+    public async Task<List<CourseInfoDto>> GetMySubjectsAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/subjects/mine");
+        return await response.Content.ReadFromJsonAsync<List<CourseInfoDto>>(JsonOptions) ?? [];
+    }
+
+    // SDA-17
+    public async Task<TeacherFeedbackDto> SubmitTeacherFeedbackAsync(Guid teacherId, int rating, string? comments)
+    {
+        var response = await SendAsync(HttpMethod.Post, "/api/v1/teacher-feedback", new SubmitTeacherFeedbackRequest(teacherId, rating, comments));
+        return await response.Content.ReadFromJsonAsync<TeacherFeedbackDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty feedback response");
+    }
+
     public async Task LogoutAsync()
     {
         if (Token is null)

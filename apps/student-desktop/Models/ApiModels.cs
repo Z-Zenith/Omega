@@ -28,3 +28,11 @@ public record MyMarksResponse(List<InternalMarkDto> InternalMarks, List<External
 public record SubmitAssignmentRequest(string ContentUrl, string SubmissionFormat);
 
 public record SubmissionDto(Guid Id, Guid AssignmentId, Guid StudentId, string ContentUrl, DateTime SubmittedAt, bool IsLate, bool IsAutosubmitted);
+
+// SDA-18
+public record CourseInfoDto(Guid SubjectId, string Code, string Name, Guid? TeacherId, string? TeacherName);
+
+// SDA-17
+public record SubmitTeacherFeedbackRequest(Guid TeacherId, int Rating, string? Comments);
+
+public record TeacherFeedbackDto(Guid Id, Guid StudentId, Guid TeacherId, int Rating, string? Comments, DateTime SubmittedAt);
