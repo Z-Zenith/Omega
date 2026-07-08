@@ -5,6 +5,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace BackendApi.Controllers;
@@ -19,8 +20,10 @@ public class AuthController(
 {
     // SDA-02, TWA-03: roll number/username + password + TOTP code.
     // Acceptance criteria requires a distinct rejection message per failure reason.
+    // Rate limited (#79): no lockout otherwise existed on this endpoint, repo-wide.
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterPolicies.Auth)]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
     {
         var user = await db.Users

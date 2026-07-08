@@ -4,6 +4,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace BackendApi.Controllers;
@@ -15,8 +16,11 @@ public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService)
     // PRT-01 — roll number + DOB only, no TOTP. The credential identifies the ward, not a
     // separate parent identity; a parent account must already be linked to that ward via
     // parent_wards (provisioned out-of-band by admin account management, AWA-09/10).
+    // Rate limited (#79): DOB-only auth is guessable, so this endpoint gets the same
+    // IP-keyed sliding-window limiter as AuthController.Login.
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterPolicies.Auth)]
     public async Task<ActionResult<ParentLoginResponse>> Login(ParentLoginRequest request)
     {
         // Identifier is only unique per (college_id, identifier), not globally — a roll number
