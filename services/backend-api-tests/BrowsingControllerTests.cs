@@ -30,11 +30,11 @@ public class BrowsingControllerTests
         IsActive = true,
     };
 
-    private static BrowsingController ControllerAs(AppDbContext db, User user)
+    private static BrowsingController ControllerAs(AppDbContext db, User user, FakeAiServicesClient? aiServices = null)
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
-        return new BrowsingController(db)
+        return new BrowsingController(db, aiServices ?? new FakeAiServicesClient())
         {
             ControllerContext = new ControllerContext
             {
@@ -313,5 +313,108 @@ public class BrowsingControllerTests
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Single(await db.WhitelistSites.Where(s => s.CollegeId == requesterA.CollegeId).ToListAsync());
+    }
+
+    // AIS-07: "never shown to the student" — enforced by requiring a teacher/admin caller.
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_ForbidsStudents()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: Guid.NewGuid());
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task Ais07_SuspiciousFlags_RequiresExactlyOneScopeParameter(bool giveClassSession, bool giveAssignment)
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.SuspiciousFlags(
+            classSessionId: giveClassSession ? Guid.NewGuid() : null,
+            assignmentId: giveAssignment ? Guid.NewGuid() : null);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_ForbidsATeacherWhoDoesNotOwnTheAssignment()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Code, DueDate = DateTime.UtcNow.AddDays(7), SubmissionWindowStart = DateTime.UtcNow, SubmissionWindowEnd = DateTime.UtcNow.AddDays(7) };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: assignment.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_PersistsFlagsFromAiServices_ForTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var student = NewUser(AccountType.Student);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Code, DueDate = DateTime.UtcNow.AddDays(7), SubmissionWindowStart = DateTime.UtcNow, SubmissionWindowEnd = DateTime.UtcNow.AddDays(7) };
+        db.Users.AddRange(teacher, student);
+        db.Assignments.Add(assignment);
+        db.UsageTelemetries.Add(new UsageTelemetry
+        {
+            Id = Guid.NewGuid(),
+            StudentId = student.Id,
+            AssignmentId = assignment.Id,
+            EventType = "paste",
+            Metadata = "{}",
+            RecordedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var fakeAi = new FakeAiServicesClient
+        {
+            SuspiciousFlagResults = [new(student.Id.ToString(), null, assignment.Id.ToString(), 0.85, ["Rapid paste after long idle"])],
+        };
+        var controller = ControllerAs(db, teacher, fakeAi);
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: assignment.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var flags = Assert.IsType<List<SuspiciousFlagReportDto>>(ok.Value);
+        var flag = Assert.Single(flags);
+        Assert.Equal(0.85m, flag.ConfidenceScore);
+        Assert.Single(await db.SuspiciousFlags.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_ReCheckReplacesPreviousFlagsForTheSameAssignment()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var student = NewUser(AccountType.Student);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Code, DueDate = DateTime.UtcNow.AddDays(7), SubmissionWindowStart = DateTime.UtcNow, SubmissionWindowEnd = DateTime.UtcNow.AddDays(7) };
+        db.Users.AddRange(teacher, student);
+        db.Assignments.Add(assignment);
+        db.SuspiciousFlags.Add(new SuspiciousFlag { Id = Guid.NewGuid(), StudentId = student.Id, AssignmentId = assignment.Id, ConfidenceScore = 0.99m, FlaggedAt = DateTime.UtcNow.AddDays(-1) });
+        await db.SaveChangesAsync();
+
+        // No telemetry recorded this time, so the AI client won't even be called.
+        var controller = ControllerAs(db, teacher, new FakeAiServicesClient());
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: assignment.Id);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(await db.SuspiciousFlags.ToListAsync());
     }
 }
