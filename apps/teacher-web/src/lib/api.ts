@@ -152,6 +152,31 @@ export function submitSectionFeedback(sectionId: string, rating: number, comment
   })
 }
 
+export interface StudentAttendanceDto {
+  studentId: string
+  studentName: string
+  attendancePercentage: number | null
+}
+
+export interface SubjectMarksSummaryDto {
+  subjectId: string
+  subjectName: string
+  averageMarks: number | null
+  studentsGraded: number
+}
+
+export interface SectionPerformanceSummaryDto {
+  sectionId: string
+  sectionName: string
+  overallAttendancePercentage: number | null
+  studentAttendance: StudentAttendanceDto[]
+  marksBySubject: SubjectMarksSummaryDto[]
+}
+
+export function getSectionPerformanceSummary(sectionId: string) {
+  return request<SectionPerformanceSummaryDto>(`/timetable/sections/${sectionId}/performance-summary`)
+}
+
 export interface EventDto {
   id: string
   title: string
@@ -193,6 +218,31 @@ export function createReport(report: { sectionId?: string | null; studentId?: st
       studentId: report.studentId ?? null,
       content: report.content,
     }),
+  })
+}
+
+export interface ExternalMarksPermissionStatus {
+  granted: boolean
+  expiresAt: string | null
+}
+
+export function getExternalMarksPermissionStatus() {
+  return request<ExternalMarksPermissionStatus>('/marks/external/permission-status')
+}
+
+export interface ExternalMarkSubmission {
+  id: string
+  studentId: string
+  subjectId: string
+  grade: string
+  status: string
+  submittedAt: string
+}
+
+export function submitExternalMark(mark: { studentId: string; subjectId: string; grade: string }) {
+  return request<ExternalMarkSubmission>('/marks/external', {
+    method: 'POST',
+    body: JSON.stringify(mark),
   })
 }
 
