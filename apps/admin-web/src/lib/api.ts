@@ -134,8 +134,129 @@ export interface TeacherReportDto {
   submittedAt: string
 }
 
+export interface RoleBindingDto {
+  id: string
+  userId: string
+  userFullName: string
+  roleCode: string
+  scopeType: 'Global' | 'Department'
+  departmentId: string | null
+  grantedAt: string
+}
+
+export function listRoleBindings() {
+  return request<RoleBindingDto[]>('/role-bindings')
+}
+
+export function createRoleBinding(binding: {
+  userId: string
+  roleCode: string
+  scopeType: 'Global' | 'Department'
+  departmentId: string | null
+}) {
+  return request<RoleBindingDto>('/role-bindings', {
+    method: 'POST',
+    body: JSON.stringify(binding),
+  })
+}
+
+export interface PermissionGrantDto {
+  id: string
+  userId: string
+  userFullName: string
+  permissionCode: string
+  granted: boolean
+  expiresAt: string | null
+  grantedBy: string
+  createdAt: string
+}
+
+export function listPermissionGrants() {
+  return request<PermissionGrantDto[]>('/permission-grants')
+}
+
+export function createPermissionGrant(grant: {
+  userId: string
+  permissionCode: string
+  granted: boolean
+  expiresAt: string | null
+}) {
+  return request<PermissionGrantDto>('/permission-grants', {
+    method: 'POST',
+    body: JSON.stringify(grant),
+  })
+}
+
+export function deletePermissionGrant(id: string) {
+  return request<void>(`/permission-grants/${id}`, { method: 'DELETE' })
+}
+
+export type AccountType = 'Student' | 'Teacher'
+
+export interface CreateUserRequest {
+  collegeId: string
+  accountType: AccountType
+  identifier: string
+  initialPassword: string
+  fullName: string
+  departmentId: string | null
+}
+
+export interface CreateUserResponse {
+  userId: string
+  totpProvisioningUri: string
+  totpSecret: string
+}
+
+export function createUser(user: CreateUserRequest) {
+  return request<CreateUserResponse>('/users', {
+    method: 'POST',
+    body: JSON.stringify(user),
+  })
+}
+
+// AWA-07
+export interface TeacherRemarkDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  content: string
+  submittedAt: string
+}
+
 export function getReports() {
   return request<TeacherReportDto[]>('/reports')
+}
+
+export interface BrowsingSummaryReportDto {
+  id: string
+  summaryText: string
+  generatedAt: string
+}
+
+export interface SuspiciousFlagReportDto {
+  id: string
+  confidenceScore: number
+  flaggedAt: string
+  assignmentId: string | null
+  classSessionId: string | null
+}
+
+export interface StudentRecordDto {
+  id: string
+  fullName: string
+  identifier: string
+  accountType: string
+  collegeId: string
+  departmentId: string | null
+  isActive: boolean
+  remarks: TeacherRemarkDto[]
+  browsingSummaries: BrowsingSummaryReportDto[]
+  suspiciousFlags: SuspiciousFlagReportDto[]
+}
+
+export function getStudentRecord(userId: string) {
+  return request<StudentRecordDto>(`/users/${userId}/profile`)
 }
 
 export { ApiError }
