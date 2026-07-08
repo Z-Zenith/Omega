@@ -243,4 +243,14 @@ export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
 }
 
+// AWA-05 — backend: FeesController.SendPaymentReminders (already on main).
+export interface SendFeeRemindersResponse {
+  feesDueSoon: number
+  notifiedParentIds: string[]
+}
+
+export function sendPaymentReminders(daysBefore: number) {
+  return request<SendFeeRemindersResponse>(`/fees/reminders?daysBefore=${daysBefore}`, { method: 'POST' })
+}
+
 export { ApiError }
