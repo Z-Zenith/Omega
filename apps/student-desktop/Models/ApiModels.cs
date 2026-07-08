@@ -28,9 +28,12 @@ public record WhitelistSiteDto(Guid Id, string Url, DateTime ApprovedAt);
 public record WhitelistResponse(List<WhitelistSiteDto> Sites);
 
 // SDA-08, SEK-03
-public record CreateNoteRequest(string Title, string ContentMarkdown);
+// SDA-19: outgoing links as parsed by SEK's own extractOutgoingLinks, forwarded as-is.
+public record NoteLinkInput(Guid ToNoteId, string Anchor);
 
-public record UpdateNoteRequest(string Title, string ContentMarkdown);
+public record CreateNoteRequest(string Title, string ContentMarkdown, Guid? Id = null, IReadOnlyList<NoteLinkInput>? Links = null);
+
+public record UpdateNoteRequest(string Title, string ContentMarkdown, IReadOnlyList<NoteLinkInput>? Links = null);
 
 public record NoteDto(Guid Id, string Title, string ContentMarkdown, DateTime CreatedAt, DateTime UpdatedAt);
 

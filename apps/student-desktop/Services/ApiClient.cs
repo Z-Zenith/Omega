@@ -103,18 +103,31 @@ public class ApiClient
             ?? throw new ApiException(500, "Empty note response");
     }
 
-    public async Task<NoteDto> CreateNoteAsync(string title, string contentMarkdown)
+    public async Task<NoteDto> CreateNoteAsync(string title, string contentMarkdown, Guid? id = null, IReadOnlyList<NoteLinkInput>? links = null)
     {
-        var response = await SendAsync(HttpMethod.Post, "/api/v1/notes", new CreateNoteRequest(title, contentMarkdown));
+        var response = await SendAsync(HttpMethod.Post, "/api/v1/notes", new CreateNoteRequest(title, contentMarkdown, id, links));
         return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
             ?? throw new ApiException(500, "Empty note response");
     }
 
-    public async Task<NoteDto> UpdateNoteAsync(Guid noteId, string title, string contentMarkdown)
+    public async Task<NoteDto> UpdateNoteAsync(Guid noteId, string title, string contentMarkdown, IReadOnlyList<NoteLinkInput>? links = null)
     {
-        var response = await SendAsync(HttpMethod.Patch, $"/api/v1/notes/{noteId}", new UpdateNoteRequest(title, contentMarkdown));
+        var response = await SendAsync(HttpMethod.Patch, $"/api/v1/notes/{noteId}", new UpdateNoteRequest(title, contentMarkdown, links));
         return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
             ?? throw new ApiException(500, "Empty note response");
+    }
+
+    // SDA-19
+    public async Task DeleteNoteAsync(Guid noteId)
+    {
+        await SendAsync(HttpMethod.Delete, $"/api/v1/notes/{noteId}");
+    }
+
+    // SDA-19/SEK-03: onListBacklinks
+    public async Task<List<NoteDto>> GetBacklinksAsync(Guid noteId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/notes/{noteId}/backlinks");
+        return await response.Content.ReadFromJsonAsync<List<NoteDto>>(JsonOptions) ?? [];
     }
 
     public async Task LogoutAsync()
