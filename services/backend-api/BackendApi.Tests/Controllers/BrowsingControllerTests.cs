@@ -1,0 +1,421 @@
+using System.Security.Claims;
+using BackendApi.Contracts;
+using BackendApi.Controllers;
+using BackendApi.Data;
+using BackendApi.Data.Entities;
+using BackendApi.Tests.Fakes;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace BackendApi.Tests.Controllers;
+
+public class BrowsingControllerTests
+{
+    private static AppDbContext NewDb()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        return new AppDbContext(options);
+    }
+
+    private static User NewUser(AccountType accountType, Guid? collegeId = null) => new()
+    {
+        Id = Guid.NewGuid(),
+        CollegeId = collegeId ?? Guid.NewGuid(),
+        Identifier = $"user-{Guid.NewGuid():N}",
+        PasswordHash = "hash",
+        FullName = "Test User",
+        AccountType = accountType,
+        IsActive = true,
+    };
+
+    private static BrowsingController ControllerAs(AppDbContext db, User user, FakeAiServicesClient? aiServices = null)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
+        return new BrowsingController(db, aiServices ?? new FakeAiServicesClient())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = principal },
+            },
+        };
+    }
+
+    // SDA-03
+    [Fact]
+    public async Task Sda03_GetWhitelist_OnlyReturnsSitesForCallersCollege()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        db.WhitelistSites.AddRange(
+            new WhitelistSite { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Url = "https://allowed.example", ApprovedAt = DateTime.UtcNow },
+            new WhitelistSite { Id = Guid.NewGuid(), CollegeId = Guid.NewGuid(), Url = "https://otherclass.example", ApprovedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.GetWhitelist();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<WhitelistResponse>(ok.Value);
+        Assert.Single(response.Sites);
+        Assert.Equal("https://allowed.example", response.Sites[0].Url);
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_RequestWhitelist_CreatesPendingRequest_ForValidUrl()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.RequestWhitelist(new CreateWhitelistRequestRequest("https://newsite.example"));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<WhitelistRequestDto>(ok.Value);
+        Assert.Equal("Pending", dto.Status);
+        Assert.Single(await db.WhitelistRequests.ToListAsync());
+    }
+
+    // SDA-04
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-url")]
+    [InlineData("ftp://wrong-scheme.example")]
+    public async Task Sda04_RequestWhitelist_RejectsInvalidUrl(string invalidUrl)
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.RequestWhitelist(new CreateWhitelistRequestRequest(invalidUrl));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_RequestWhitelist_ReturnsConflict_WhenUrlAlreadyWhitelisted()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        db.WhitelistSites.Add(new WhitelistSite { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Url = "https://already.example", ApprovedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.RequestWhitelist(new CreateWhitelistRequestRequest("https://already.example"));
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    // SDA-04: host casing and a bare trailing slash must not let the same site dodge the
+    // already-whitelisted check by being tracked as a different URL string.
+    [Theory]
+    [InlineData("https://Already.Example")]
+    [InlineData("https://already.example/")]
+    public async Task Sda04_RequestWhitelist_ReturnsConflict_ForCaseOrTrailingSlashVariantOfWhitelistedUrl(string variantUrl)
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        db.WhitelistSites.Add(new WhitelistSite { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Url = "https://already.example", ApprovedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.RequestWhitelist(new CreateWhitelistRequestRequest(variantUrl));
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_RequestWhitelist_IsIdempotent_ReturnsExistingPendingRequestForSameCollegeAndUrl()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var first = await controller.RequestWhitelist(new CreateWhitelistRequestRequest("https://dup.example"));
+        var second = await controller.RequestWhitelist(new CreateWhitelistRequestRequest("https://dup.example"));
+
+        var firstDto = (WhitelistRequestDto)((OkObjectResult)first.Result!).Value!;
+        var secondDto = (WhitelistRequestDto)((OkObjectResult)second.Result!).Value!;
+        Assert.Equal(firstDto.Id, secondDto.Id);
+        Assert.Single(await db.WhitelistRequests.ToListAsync());
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_ListPendingRequests_ForbidsStudents()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListPendingRequests();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_ListPendingRequests_OnlyReturnsPendingForReviewersCollege()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var sameCollegeStudent = NewUser(AccountType.Student, teacher.CollegeId);
+        var otherCollegeStudent = NewUser(AccountType.Student);
+        db.Users.AddRange(teacher, sameCollegeStudent, otherCollegeStudent);
+        db.WhitelistRequests.AddRange(
+            new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://mine.example", RequestedBy = sameCollegeStudent.Id, Status = WhitelistRequestStatus.Pending },
+            new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://other-college.example", RequestedBy = otherCollegeStudent.Id, Status = WhitelistRequestStatus.Pending },
+            new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://already-approved.example", RequestedBy = sameCollegeStudent.Id, Status = WhitelistRequestStatus.Approved });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.ListPendingRequests();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var list = Assert.IsType<List<WhitelistRequestDto>>(ok.Value);
+        Assert.Single(list);
+        Assert.Equal("https://mine.example", list[0].Url);
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_ApproveWhitelistRequest_ForbidsStudents()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        var requester = NewUser(AccountType.Student);
+        db.Users.AddRange(student, requester);
+        var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://x.example", RequestedBy = requester.Id, Status = WhitelistRequestStatus.Pending };
+        db.WhitelistRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ApproveWhitelistRequest(request.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    // SDA-04: this is the acceptance-critical path — approval must create an
+    // institution-wide site, not something scoped to the requesting student's class.
+    [Fact]
+    public async Task Sda04_ApproveWhitelistRequest_CreatesSiteForRequestersCollege_AndMarksApproved()
+    {
+        await using var db = NewDb();
+        var requester = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher, requester.CollegeId);
+        db.Users.AddRange(teacher, requester);
+        var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://approve-me.example", RequestedBy = requester.Id, Status = WhitelistRequestStatus.Pending };
+        db.WhitelistRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.ApproveWhitelistRequest(request.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ApproveWhitelistRequestResponse>(ok.Value);
+        Assert.Equal("Approved", response.Status);
+
+        var reloaded = await db.WhitelistRequests.FindAsync(request.Id);
+        Assert.Equal(WhitelistRequestStatus.Approved, reloaded!.Status);
+        Assert.Equal(teacher.Id, reloaded.ReviewedBy);
+
+        var site = Assert.Single(await db.WhitelistSites.Where(s => s.CollegeId == requester.CollegeId).ToListAsync());
+        Assert.Equal("https://approve-me.example", site.Url);
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_ApproveWhitelistRequest_ReturnsConflict_WhenAlreadyReviewed()
+    {
+        await using var db = NewDb();
+        var requester = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher, requester.CollegeId);
+        db.Users.AddRange(teacher, requester);
+        var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://x.example", RequestedBy = requester.Id, Status = WhitelistRequestStatus.Approved, ReviewedBy = teacher.Id };
+        db.WhitelistRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.ApproveWhitelistRequest(request.Id);
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    // SDA-04: a reviewer must not be able to approve — or even detect the existence of —
+    // a pending request submitted by a student in a different college.
+    [Fact]
+    public async Task Sda04_ApproveWhitelistRequest_ReturnsNotFound_ForRequestFromAnotherCollege()
+    {
+        await using var db = NewDb();
+        var requester = NewUser(AccountType.Student);
+        var otherCollegeTeacher = NewUser(AccountType.Teacher);
+        db.Users.AddRange(requester, otherCollegeTeacher);
+        var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://cross-college.example", RequestedBy = requester.Id, Status = WhitelistRequestStatus.Pending };
+        db.WhitelistRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherCollegeTeacher);
+        var result = await controller.ApproveWhitelistRequest(request.Id);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+        var reloaded = await db.WhitelistRequests.FindAsync(request.Id);
+        Assert.Equal(WhitelistRequestStatus.Pending, reloaded!.Status);
+    }
+
+    // SDA-04
+    [Fact]
+    public async Task Sda04_ApproveWhitelistRequest_ReturnsNotFound_ForUnknownId()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.ApproveWhitelistRequest(Guid.NewGuid());
+
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    // SDA-04: two pending requests for the same URL both get approved without violating
+    // the (college_id, url) unique index on whitelist_sites.
+    [Fact]
+    public async Task Sda04_ApproveWhitelistRequest_DoesNotDuplicateSite_WhenAlreadyApprovedByAnotherRequest()
+    {
+        await using var db = NewDb();
+        var requesterA = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher, requesterA.CollegeId);
+        var requesterB = NewUser(AccountType.Student, requesterA.CollegeId);
+        db.Users.AddRange(teacher, requesterA, requesterB);
+        db.WhitelistSites.Add(new WhitelistSite { Id = Guid.NewGuid(), CollegeId = requesterA.CollegeId, Url = "https://shared.example", ApprovedAt = DateTime.UtcNow });
+        var request = new WhitelistRequest { Id = Guid.NewGuid(), Url = "https://shared.example", RequestedBy = requesterB.Id, Status = WhitelistRequestStatus.Pending };
+        db.WhitelistRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.ApproveWhitelistRequest(request.Id);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Single(await db.WhitelistSites.Where(s => s.CollegeId == requesterA.CollegeId).ToListAsync());
+    }
+
+    // AIS-07: "never shown to the student" — enforced by requiring a teacher/admin caller.
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_ForbidsStudents()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: Guid.NewGuid());
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task Ais07_SuspiciousFlags_RequiresExactlyOneScopeParameter(bool giveClassSession, bool giveAssignment)
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.SuspiciousFlags(
+            classSessionId: giveClassSession ? Guid.NewGuid() : null,
+            assignmentId: giveAssignment ? Guid.NewGuid() : null);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_ForbidsATeacherWhoDoesNotOwnTheAssignment()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Code, DueDate = DateTime.UtcNow.AddDays(7), SubmissionWindowStart = DateTime.UtcNow, SubmissionWindowEnd = DateTime.UtcNow.AddDays(7) };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: assignment.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_PersistsFlagsFromAiServices_ForTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var student = NewUser(AccountType.Student);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Code, DueDate = DateTime.UtcNow.AddDays(7), SubmissionWindowStart = DateTime.UtcNow, SubmissionWindowEnd = DateTime.UtcNow.AddDays(7) };
+        db.Users.AddRange(teacher, student);
+        db.Assignments.Add(assignment);
+        db.UsageTelemetries.Add(new UsageTelemetry
+        {
+            Id = Guid.NewGuid(),
+            StudentId = student.Id,
+            AssignmentId = assignment.Id,
+            EventType = "paste",
+            Metadata = "{}",
+            RecordedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var fakeAi = new FakeAiServicesClient
+        {
+            SuspiciousFlagResults = [new(student.Id.ToString(), null, assignment.Id.ToString(), 0.85, ["Rapid paste after long idle"])],
+        };
+        var controller = ControllerAs(db, teacher, fakeAi);
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: assignment.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var flags = Assert.IsType<List<SuspiciousFlagReportDto>>(ok.Value);
+        var flag = Assert.Single(flags);
+        Assert.Equal(0.85m, flag.ConfidenceScore);
+        Assert.Single(await db.SuspiciousFlags.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ais07_SuspiciousFlags_ReCheckReplacesPreviousFlagsForTheSameAssignment()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var student = NewUser(AccountType.Student);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Code, DueDate = DateTime.UtcNow.AddDays(7), SubmissionWindowStart = DateTime.UtcNow, SubmissionWindowEnd = DateTime.UtcNow.AddDays(7) };
+        db.Users.AddRange(teacher, student);
+        db.Assignments.Add(assignment);
+        db.SuspiciousFlags.Add(new SuspiciousFlag { Id = Guid.NewGuid(), StudentId = student.Id, AssignmentId = assignment.Id, ConfidenceScore = 0.99m, FlaggedAt = DateTime.UtcNow.AddDays(-1) });
+        await db.SaveChangesAsync();
+
+        // No telemetry recorded this time, so the AI client won't even be called.
+        var controller = ControllerAs(db, teacher, new FakeAiServicesClient());
+        var result = await controller.SuspiciousFlags(classSessionId: null, assignmentId: assignment.Id);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(await db.SuspiciousFlags.ToListAsync());
+    }
+}
