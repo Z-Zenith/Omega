@@ -6,6 +6,7 @@ import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
 import { ReportsInboxPage } from '@/pages/ReportsInboxPage'
+import { PasswordResetPage } from '@/pages/PasswordResetPage'
 import { RolesPage } from '@/pages/RolesPage'
 import { CreateAccountPage } from '@/pages/CreateAccountPage'
 import { StudentRecordPage } from '@/pages/StudentRecordPage'
@@ -46,6 +47,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/timetable">Timetable</Link>
           <Link to="/events">Events</Link>
           <Link to="/reports">Reports</Link>
+          <Link to="/password-reset">Password Reset</Link>
           {canManageRoles && <Link to="/roles">Roles & Permissions</Link>}
           <Link to="/accounts/new">Create account</Link>
           <Link to="/students">Student Records</Link>
@@ -93,6 +95,16 @@ function App() {
             <RequireAuth>
               <Shell>
                 <ReportsInboxPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/password-reset"
+          element={
+            <RequireAuth>
+              <Shell>
+                <PasswordResetPage />
               </Shell>
             </RequireAuth>
           }
