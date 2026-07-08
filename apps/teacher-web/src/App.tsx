@@ -4,9 +4,11 @@ import { ActiveSectionProvider, useActiveSection } from '@/lib/activeSection'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { ExternalMarksPage } from '@/pages/ExternalMarksPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
+import { DashboardPage } from '@/pages/DashboardPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -53,9 +55,11 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-svh">
       <nav className="flex items-center justify-between border-b px-8 py-4">
         <div className="flex gap-6 text-sm font-medium">
+          <Link to="/dashboard">Dashboard</Link>
           <Link to="/timetable">Timetable</Link>
           <Link to="/attendance">Attendance</Link>
           <Link to="/events">Events</Link>
+          <Link to="/external-marks">External Marks</Link>
           <Link to="/marks">Marks</Link>
           <Link to="/messages">Messages</Link>
         </div>
@@ -80,6 +84,16 @@ function App() {
       <ActiveSectionProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <DashboardPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
           <Route
             path="/timetable"
             element={
@@ -106,6 +120,16 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <EventsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/external-marks"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <ExternalMarksPage />
                 </Shell>
               </RequireAuth>
             }

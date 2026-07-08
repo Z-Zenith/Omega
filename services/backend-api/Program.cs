@@ -1,6 +1,7 @@
 using System.Text;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using BackendApi.Hubs;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +39,11 @@ builder.Services.AddScoped<ITotpService, TotpService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
+// Notification Router (shared) — see Services/INotificationRouter.cs.
+builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
+builder.Services.AddSignalR();
+// SDA-13
+builder.Services.AddHostedService<NoLoginAlertHostedService>();
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSection["Key"];
@@ -64,6 +70,22 @@ builder.Services
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromSeconds(30),
         };
+        // SignalR's browser/websocket clients can't set an Authorization header on the
+        // handshake, so the Notification Router's hub accepts the JWT via query string
+        // instead — only for requests actually hitting the hub path.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/notifications"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            },
+        };
     });
 builder.Services.AddAuthorization();
 
@@ -81,5 +103,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+// Notification Router (shared) — real-time transport, see Hubs/NotificationsHub.cs.
+app.MapHub<NotificationsHub>("/hubs/notifications");
 
 app.Run();
