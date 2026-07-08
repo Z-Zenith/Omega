@@ -23,6 +23,8 @@ import type {
   OutgoingLinks,
 } from './types.js';
 import { extractOutgoingLinks } from './linkExtraction.js';
+import { ImageSearchPanel } from '../image-search/ImageSearchPanel.js';
+import type { ImageInsert } from '../image-search/types.js';
 
 type LinkStatus = 'pending' | 'resolved' | 'not_found';
 
@@ -34,7 +36,7 @@ function newNoteId(): string {
 
 export const NotesEditor = forwardRef<NotesEditorApi, NotesEditorProps>(
   function NotesEditor(
-    { user, currentNote, canEdit, onSave, onDelete, onResolveLink, onListBacklinks },
+    { user, currentNote, canEdit, onSave, onDelete, onResolveLink, onListBacklinks, imageSearch },
     ref
   ) {
     const [title, setTitle] = useState(currentNote?.title ?? '');
@@ -42,12 +44,17 @@ export const NotesEditor = forwardRef<NotesEditorApi, NotesEditorProps>(
     const [backlinks, setBacklinks] = useState<Backlinks>([]);
     const [linkStatuses, setLinkStatuses] = useState<Record<string, LinkStatus>>({});
     const [error, setError] = useState<SekError | null>(null);
+    const [showImageSearch, setShowImageSearch] = useState(false);
 
     // Imperative-handle methods close over stale state without this — keep a
     // ref mirroring the latest draft so getMarkdown()/getOutgoingLinks() are
     // always current even though the handle object identity is stable.
     const contentRef = useRef(content);
     contentRef.current = content;
+
+    // SEK-04: tracks the textarea DOM node so an inserted image lands at the
+    // cursor rather than always appending to the end of the note.
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
     const outgoingLinks: OutgoingLinks = useMemo(
       () => extractOutgoingLinks(content),
@@ -149,6 +156,27 @@ export const NotesEditor = forwardRef<NotesEditorApi, NotesEditorProps>(
       if (!result.ok) setError(result.error);
     };
 
+    // SEK-04: writes ImageInsert.embeddedUrl (the content-addressed URL from
+    // onUploadImage), never the search result's original sourceUrl — that's
+    // what makes the embed "embedded, not linked" per the acceptance criterion.
+    const handleInsertImage = (insert: ImageInsert) => {
+      const markdown = `![${insert.altText}](${insert.embeddedUrl})`;
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        setContent((prev) => `${prev}\n${markdown}\n`);
+        return;
+      }
+      const { selectionStart, selectionEnd } = textarea;
+      setContent((prev) => `${prev.slice(0, selectionStart)}${markdown}${prev.slice(selectionEnd)}`);
+      // Wait for React to commit the new value before moving the cursor —
+      // setSelectionRange on the current render would operate on stale text.
+      requestAnimationFrame(() => {
+        const pos = selectionStart + markdown.length;
+        textarea.focus();
+        textarea.setSelectionRange(pos, pos);
+      });
+    };
+
     return (
       <div className="sek-notes-editor">
         {error && (
@@ -164,11 +192,15 @@ export const NotesEditor = forwardRef<NotesEditorApi, NotesEditorProps>(
           disabled={!canEdit}
         />
         <textarea
+          ref={textareaRef}
           className="sek-notes-editor__body"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           disabled={!canEdit}
         />
+        {canEdit && imageSearch && showImageSearch && (
+          <ImageSearchPanel user={user} {...imageSearch} onInsert={handleInsertImage} />
+        )}
         {canEdit && (
           <div className="sek-notes-editor__actions">
             <button type="button" onClick={handleSave}>
@@ -177,6 +209,11 @@ export const NotesEditor = forwardRef<NotesEditorApi, NotesEditorProps>(
             {currentNote && (
               <button type="button" onClick={handleDelete}>
                 Delete
+              </button>
+            )}
+            {imageSearch && (
+              <button type="button" onClick={() => setShowImageSearch((v) => !v)}>
+                {showImageSearch ? 'Close image search' : 'Insert image'}
               </button>
             )}
           </div>

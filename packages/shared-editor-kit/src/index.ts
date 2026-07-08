@@ -16,7 +16,9 @@
  *   - SEK-01 (Code editor)            — Must — implemented (CodeEditor).
  *   - SEK-02 (Document viewer)        — Must — interface only.
  *   - SEK-03 (Markdown notes)         — Must — implemented (NotesEditor).
- *   - SEK-04 (Built-in image search)  — Could — interface only.
+ *   - SEK-04 (Built-in image search)  — Could — implemented (ImageSearchPanel),
+ *                                       wired into NotesEditor via its optional
+ *                                       `imageSearch` prop — no separate screen.
  *   - SEK-05 (Inking w/ diagrams)     — Won't — deliberately NOT defined here.
  *                                       Will reuse the InkStroke primitive
  *                                       (types/common.ts) when promoted.
@@ -88,4 +90,6 @@ export type {
   ImageSearchResponse,
   ImageInsert,
   ImageSearchProps,
+  ImageSearchPanelProps,
 } from './image-search/index.js';
+export { ImageSearchPanel } from './image-search/index.js';

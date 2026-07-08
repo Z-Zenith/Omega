@@ -15,6 +15,7 @@
  */
 
 import type { Result, SekError, UserContext } from '../types/common.js';
+import type { ImageSearchProps } from '../image-search/types.js';
 
 /** A persisted note. Content is raw Markdown, not rendered HTML. */
 export interface Note {
@@ -69,6 +70,14 @@ export interface NotesEditorProps {
   readonly onResolveLink: (toNoteId: string) => Promise<Result<Note, SekError>>;
   /** Query backlinks (notes that link TO a given note). */
   readonly onListBacklinks: (toNoteId: string) => Promise<Result<Backlinks, SekError>>;
+  /**
+   * SEK-04: built-in image search, rendered inline in the editor (see
+   * ../image-search/ImageSearchPanel.tsx) — never a separate screen. Omit
+   * entirely to disable; SEK-04 is "Could" priority, not every embedder build
+   * wires this in. `user` is not repeated here since NotesEditorProps.user
+   * above already carries it.
+   */
+  readonly imageSearch?: Pick<ImageSearchProps, 'enabled' | 'onSearch' | 'onUploadImage'>;
 }
 
 export interface NotesEditorApi {

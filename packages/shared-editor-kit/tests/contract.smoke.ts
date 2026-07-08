@@ -47,9 +47,10 @@ import type {
   ImageSearchResponse,
   ImageInsert,
   ImageSearchProps,
+  ImageSearchPanelProps,
 } from '../src/index.js';
 
-import { CodeEditor, LANGUAGE_LABELS, isSupportedLanguage } from '../src/index.js';
+import { CodeEditor, ImageSearchPanel, LANGUAGE_LABELS, isSupportedLanguage } from '../src/index.js';
 
 // ---- subpath imports also resolve (tree-shaking contract) ----
 import type { CodeEditorProps as CEP } from '../src/code-editor/index.js';
@@ -135,6 +136,13 @@ const _imageInsert: ImageInsert = {
   attribution: 'CC-BY / Author',
 };
 void _imageInsert;
+
+// SEK-04 — ImageSearchPanel resolves from the barrel (implemented component,
+// same as CodeEditor below) and its props extend ImageSearchProps plus onInsert.
+declare const _imageSearchPanelComponent: typeof ImageSearchPanel;
+void _imageSearchPanelComponent;
+declare const _imageSearchPanelProps: ImageSearchPanelProps;
+void _imageSearchPanelProps;
 
 // API surface references compile (not invoked)
 declare const _codeApi: CodeEditorApi;
