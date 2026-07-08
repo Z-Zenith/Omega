@@ -273,6 +273,7 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 
 **`whitelist_sites`** — `id`, `college_id` FK, `url`, `approved_at` (SDA-03; institution-wide once approved per SDA-04)
 **`whitelist_requests`** — `id`, `url`, `requested_by` FK → users, `status` enum(pending, approved, rejected), `reviewed_by` FK nullable (SDA-04)
+**`browsing_history`** — `id`, `student_id` FK, `url`, `visited_at`, `duration_seconds` nullable (AIS-01 — raw per-visit log the summary below is generated from)
 **`browsing_history_summaries`** — `id`, `student_id` FK, `summary_text`, `generated_at` (AIS-01 — visibility gated by `view_browsing_history` permission at the API layer, not by a column here)
 
 ### 1.9 Shared Editor Kit (metadata only — file bytes live in GCS)
@@ -393,7 +394,8 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | GET | `/whitelist` | SDA-03 |
 | POST | `/whitelist/requests` | SDA-04 |
 | POST | `/whitelist/requests/{id}/approve` | SDA-04 |
-| GET | `/students/{id}/browsing-summary` | AIS-01 (permission-gated; not yet implemented — needs a raw browsing-visit-log table, a DB schema change out of scope for a unilateral PR) |
+| GET | `/students/{id}/browsing-summary` | AIS-01 — permission-gated (`view_browsing_history`, no self-view exception); generates and persists a fresh summary each call |
+| POST | `/browsing-history` | AIS-01 — logs one page visit (students only); feeds the summary above |
 | POST | `/telemetry` | SDA-25 (write-only, scoped windows; not yet implemented — Track 1) |
 | POST | `/suspicious-flags?classSessionId=\|assignmentId=` | AIS-07 — was a parameterless GET in the original stub; changed to POST scoped by query param since it triggers a fresh analysis and persists `suspicious_flags` rows, and needs a window to scope to |
 

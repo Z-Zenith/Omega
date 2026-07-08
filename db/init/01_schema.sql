@@ -413,6 +413,18 @@ CREATE TABLE IF NOT EXISTS whitelist_requests (
     reviewed_by   uuid REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- AIS-01: raw per-visit log the browsing summary is generated from — distinct from
+-- browsing_history_summaries below, which stores the generated summary text itself.
+CREATE TABLE IF NOT EXISTS browsing_history (
+    id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    url              text NOT NULL,
+    visited_at       timestamptz NOT NULL DEFAULT now(),
+    duration_seconds integer
+);
+CREATE INDEX IF NOT EXISTS idx_browsing_history_student_time
+    ON browsing_history (student_id, visited_at DESC);
+
 CREATE TABLE IF NOT EXISTS browsing_history_summaries (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
