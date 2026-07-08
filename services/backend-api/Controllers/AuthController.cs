@@ -5,6 +5,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace BackendApi.Controllers;
@@ -19,8 +20,10 @@ public class AuthController(
 {
     // SDA-02, TWA-03: roll number/username + password + TOTP code.
     // Acceptance criteria requires a distinct rejection message per failure reason.
+    // Rate limited (#79): no lockout otherwise existed on this endpoint, repo-wide.
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimiterPolicies.Auth)]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
     {
         var user = await db.Users
@@ -84,18 +87,14 @@ public class AuthController(
         return NoContent();
     }
 
+    // Session activity/ownership is enforced globally by SessionActiveFilter before this
+    // action runs (#77) — no need to re-check UserSessions.IsActive here.
     [HttpGet("session")]
     [Authorize]
     public async Task<ActionResult<SessionInfoResponse>> GetSession()
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
         var sessionId = Guid.Parse(User.FindFirstValue("session_id")!);
-
-        var session = await db.UserSessions.FindAsync(sessionId);
-        if (session is null || !session.IsActive || session.UserId != userId)
-        {
-            return Unauthorized(new { error = "session_revoked", message = "This session is no longer active." });
-        }
 
         var user = await db.Users.FindAsync(userId);
         if (user is null)
@@ -106,18 +105,13 @@ public class AuthController(
         return Ok(new SessionInfoResponse(user.Id, sessionId, user.AccountType.ToString(), user.FullName, user.CollegeId));
     }
 
-    // SDA-23: password change requires a fresh, successful TOTP challenge.
+    // SDA-23: password change requires a fresh, successful TOTP challenge. Session
+    // activity/ownership is enforced globally by SessionActiveFilter (#77).
     [HttpPost("change-password")]
     [Authorize]
     public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
-        var sessionId = Guid.Parse(User.FindFirstValue("session_id")!);
-        var session = await db.UserSessions.FindAsync(sessionId);
-        if (session is null || !session.IsActive || session.UserId != userId)
-        {
-            return Unauthorized(new { error = "session_revoked", message = "This session is no longer active." });
-        }
 
         var user = await db.Users.FindAsync(userId);
         if (user is null)
