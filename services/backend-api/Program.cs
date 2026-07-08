@@ -4,6 +4,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Hubs;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -90,6 +91,13 @@ builder.Services
     });
 builder.Services.AddAuthorization();
 
+// PRT-01 / SDA-02 / TWA-03 login endpoints authenticate with weak or guessable credentials
+// (roll number + DOB for parents; no lockout otherwise) — rate limit by caller IP so a
+// script can't brute-force the DOB/password space. Applied via
+// [EnableRateLimiting(RateLimiterPolicies.Auth)] on each login action rather than globally,
+// so it doesn't throttle normal authenticated traffic.
+builder.Services.AddRateLimiter(RateLimiterPolicies.ConfigureAuth);
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -99,6 +107,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
