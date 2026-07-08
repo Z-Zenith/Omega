@@ -16,6 +16,74 @@ namespace BackendApi.Controllers;
 [Authorize]
 public class CommunityController(AppDbContext db, IPermissionService permissions, IConfiguration configuration) : ControllerBase
 {
+    // API-02: "one class group created per class [section], every semester... no manual
+    // step required." No semester-start scheduler exists yet, so this is triggered
+    // manually (or by a future scheduled job) rather than firing automatically. Fully
+    // idempotent: a section that already has a Class group is skipped when creating, and
+    // every Class group's membership is re-synced against current section_enrollments on
+    // every call, so newly-enrolled students get added without duplicating existing rows.
+    [HttpPost("groups/provision-class-groups")]
+    public async Task<ActionResult<ProvisionClassGroupsResponse>> ProvisionClassGroups()
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (caller.AccountType != AccountType.AdminTier)
+        {
+            return Forbid();
+        }
+
+        // #114 review: scope to the caller's own college, matching CreateGroup's
+        // creator.CollegeId scoping — without this an Admin at one college could
+        // provision/modify class groups institution-wide across all colleges.
+        var sectionsNeedingGroups = await db.Sections
+            .Include(s => s.Department)
+            .Where(s => s.Department.CollegeId == caller.CollegeId)
+            .Where(s => !db.Groups.Any(g => g.SectionId == s.Id && g.Type == GroupType.Class))
+            .ToListAsync();
+
+        foreach (var section in sectionsNeedingGroups)
+        {
+            db.Groups.Add(new Group
+            {
+                Id = Guid.NewGuid(),
+                CollegeId = section.Department.CollegeId,
+                Name = section.Name,
+                Type = GroupType.Class,
+                SectionId = section.Id,
+                CreatedBy = caller.Id,
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var classGroups = await db.Groups
+            .Where(g => g.Type == GroupType.Class && g.CollegeId == caller.CollegeId)
+            .ToListAsync();
+        var membershipsAdded = 0;
+        foreach (var group in classGroups)
+        {
+            var enrolledStudentIds = await db.SectionEnrollments
+                .Where(e => e.SectionId == group.SectionId)
+                .Select(e => e.StudentId)
+                .ToListAsync();
+            var existingMemberIds = await db.GroupMembers
+                .Where(m => m.GroupId == group.Id)
+                .Select(m => m.UserId)
+                .ToListAsync();
+
+            foreach (var studentId in enrolledStudentIds.Except(existingMemberIds))
+            {
+                db.GroupMembers.Add(new GroupMember { Id = Guid.NewGuid(), GroupId = group.Id, UserId = studentId });
+                membershipsAdded++;
+            }
+        }
+        await db.SaveChangesAsync();
+
+        return Ok(new ProvisionClassGroupsResponse(sectionsNeedingGroups.Count, membershipsAdded));
+    }
+
     // TWA-05, AWA-12. The auto-provisioned class group (API-02) is not created through
     // this endpoint — GroupType.Class is reserved for that automation, so a caller can't
     // hand-create a second "class group" for a section.
