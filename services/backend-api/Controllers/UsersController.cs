@@ -105,6 +105,17 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             .Select(f => new SuspiciousFlagReportDto(f.Id, f.ConfidenceScore, f.FlaggedAt, f.AssignmentId, f.ClassSessionId))
             .ToListAsync();
 
+        // AWA-08: published-only, matching SDA-15/PRT-02's own publish rule exactly.
+        var internalMarks = await db.InternalMarks
+            .Where(m => m.StudentId == id && m.Published)
+            .Select(m => new InternalMarkDto(m.SubjectId, m.Subject.Name, m.Marks, m.PublishedAt))
+            .ToListAsync();
+
+        var externalMarks = await db.ExternalMarks
+            .Where(m => m.StudentId == id && m.Published)
+            .Select(m => new ExternalMarkDto(m.SubjectId, m.Subject.Name, m.Grade, m.ApprovedAt))
+            .ToListAsync();
+
         return Ok(new StudentRecordDto(
             user.Id,
             user.FullName,
@@ -115,7 +126,9 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             user.IsActive,
             remarks,
             browsingSummaries,
-            suspiciousFlags));
+            suspiciousFlags,
+            internalMarks,
+            externalMarks));
     }
 
     // AWA-10. Same reasoning as Create above: gated on reset_password so that adding

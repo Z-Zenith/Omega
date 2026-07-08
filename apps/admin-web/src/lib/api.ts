@@ -226,6 +226,21 @@ export interface SuspiciousFlagReportDto {
   classSessionId: string | null
 }
 
+// AWA-08 — same shape SDA-15/PRT-02 already use, published-only.
+export interface InternalMarkDto {
+  subjectId: string
+  subjectName: string
+  marks: number
+  publishedAt: string | null
+}
+
+export interface ExternalMarkDto {
+  subjectId: string
+  subjectName: string
+  grade: string
+  approvedAt: string | null
+}
+
 export interface StudentRecordDto {
   id: string
   fullName: string
@@ -237,6 +252,8 @@ export interface StudentRecordDto {
   remarks: TeacherRemarkDto[]
   browsingSummaries: BrowsingSummaryReportDto[]
   suspiciousFlags: SuspiciousFlagReportDto[]
+  internalMarks: InternalMarkDto[]
+  externalMarks: ExternalMarkDto[]
 }
 
 export function getStudentRecord(userId: string) {

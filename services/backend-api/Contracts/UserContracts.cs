@@ -29,6 +29,9 @@ public record SuspiciousFlagReportDto(
     Guid? AssignmentId,
     Guid? ClassSessionId);
 
+// AWA-08 — "data matches what the student sees in SDA-15, not a separate copy": reuses
+// the exact InternalMarkDto/ExternalMarkDto types and published-only filter MarksController
+// already applies for SDA-15/PRT-02, rather than a parallel shape.
 public record StudentRecordDto(
     Guid Id,
     string FullName,
@@ -39,4 +42,6 @@ public record StudentRecordDto(
     bool IsActive,
     List<TeacherRemarkDto> Remarks,
     List<BrowsingSummaryReportDto> BrowsingSummaries,
-    List<SuspiciousFlagReportDto> SuspiciousFlags);
+    List<SuspiciousFlagReportDto> SuspiciousFlags,
+    List<InternalMarkDto> InternalMarks,
+    List<ExternalMarkDto> ExternalMarks);

@@ -102,6 +102,28 @@ export function StudentRecordPage() {
               </div>
 
               <div>
+                <h4 className="text-sm font-medium">Academic performance</h4>
+                <p className="text-xs text-muted-foreground">
+                  AWA-08 — same published marks the student sees (SDA-15), not a separate copy.
+                </p>
+                {recordQuery.data.internalMarks.length === 0 && recordQuery.data.externalMarks.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No published marks.</p>
+                )}
+                <div className="mt-2 flex flex-col gap-2">
+                  {recordQuery.data.internalMarks.map((mark) => (
+                    <div key={`internal-${mark.subjectId}`} className="rounded-md border px-3 py-2 text-sm">
+                      {mark.subjectName} — {mark.marks} (internal)
+                    </div>
+                  ))}
+                  {recordQuery.data.externalMarks.map((mark) => (
+                    <div key={`external-${mark.subjectId}`} className="rounded-md border px-3 py-2 text-sm">
+                      {mark.subjectName} — {mark.grade} (external)
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
                 <h4 className="text-sm font-medium">Suspicious-behaviour flags</h4>
                 {recordQuery.data.suspiciousFlags.length === 0 && (
                   <p className="text-sm text-muted-foreground">No flags raised.</p>

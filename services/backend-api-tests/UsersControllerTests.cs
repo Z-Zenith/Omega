@@ -296,6 +296,37 @@ public class UsersControllerTests
         Assert.Single(dto.SuspiciousFlags);
     }
 
+    // AWA-08: "data matches what the student sees in SDA-15, not a separate copy" —
+    // published-only, same as SDA-15/PRT-02's own rule.
+    [Fact]
+    public async Task Awa08_GetProfile_IncludesOnlyPublishedMarks()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student, admin.CollegeId);
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = admin.CollegeId, Name = "CS" };
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS101", Name = "Intro to CS" };
+        db.Users.AddRange(admin, student);
+        db.Departments.Add(department);
+        db.Subjects.Add(subject);
+        db.PermissionGrants.Add(GrantViewAllStudentRecords(admin.Id));
+        db.InternalMarks.AddRange(
+            new InternalMark { Id = Guid.NewGuid(), StudentId = student.Id, SubjectId = subject.Id, Marks = 88, Published = true, PublishedAt = DateTime.UtcNow },
+            new InternalMark { Id = Guid.NewGuid(), StudentId = student.Id, SubjectId = subject.Id, Marks = 40, Published = false });
+        db.ExternalMarks.Add(new ExternalMark { Id = Guid.NewGuid(), StudentId = student.Id, SubjectId = subject.Id, Grade = "A", Published = true, ApprovedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.GetProfile(student.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<Contracts.StudentRecordDto>(ok.Value);
+        var internalMark = Assert.Single(dto.InternalMarks);
+        Assert.Equal(88, internalMark.Marks);
+        var externalMark = Assert.Single(dto.ExternalMarks);
+        Assert.Equal("A", externalMark.Grade);
+    }
+
     // AWA-07
     [Fact]
     public async Task Awa07_GetProfile_ReturnsNotFound_ForUnknownUser()
