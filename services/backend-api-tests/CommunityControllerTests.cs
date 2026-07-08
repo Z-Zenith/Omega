@@ -44,6 +44,16 @@ public class CommunityControllerTests
         CreatedAt = DateTime.UtcNow,
     };
 
+    private static PermissionGrant GrantViewAllGroups(Guid userId) => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = userId,
+        PermissionCode = "view_all_groups",
+        Granted = true,
+        GrantedBy = Guid.NewGuid(),
+        CreatedAt = DateTime.UtcNow,
+    };
+
     private static CommunityController ControllerAs(AppDbContext db, User user)
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -223,5 +233,40 @@ public class CommunityControllerTests
         Assert.Equal("First post!", dto.Content);
         Assert.Equal(student.Id, dto.AuthorId);
         Assert.Single(await db.GroupPosts.Where(p => p.GroupId == group.Id).ToListAsync());
+    }
+
+    // AWA-06: "no group is excluded from Admin's view regardless of who created it".
+    [Fact]
+    public async Task Awa06_AllGroups_ForbidsCallersWithoutViewAllGroupsPermission()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.AllGroups();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Awa06_AllGroups_ReturnsEveryGroupRegardlessOfMembershipOrCollege()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        db.Users.Add(admin);
+        db.PermissionGrants.Add(GrantViewAllGroups(admin.Id));
+        db.Groups.AddRange(
+            new Group { Id = Guid.NewGuid(), CollegeId = Guid.NewGuid(), Name = "Group A", Type = GroupType.Club, CreatedBy = Guid.NewGuid() },
+            new Group { Id = Guid.NewGuid(), CollegeId = Guid.NewGuid(), Name = "Group B", Type = GroupType.SubjectSection, CreatedBy = Guid.NewGuid() });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.AllGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<MyGroupsResponse>(ok.Value);
+        Assert.Equal(2, response.Groups.Count);
     }
 }
