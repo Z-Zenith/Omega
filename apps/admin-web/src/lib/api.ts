@@ -243,4 +243,17 @@ export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
 }
 
+// AWA-06 — institution-wide group visibility. Backend: CommunityController.AllGroups
+// (already on main), gated by view_all_groups (Lecturer/HoD/Admin by default).
+export interface GroupDto {
+  id: string
+  name: string
+  type: string
+  sectionId: string | null
+}
+
+export function listAllGroups() {
+  return request<{ groups: GroupDto[] }>('/groups')
+}
+
 export { ApiError }
