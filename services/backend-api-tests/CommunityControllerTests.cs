@@ -265,4 +265,44 @@ public class CommunityControllerTests
         Assert.Equal("Newer", posts[0].Content);
         Assert.Equal("Older", posts[1].Content);
     }
+
+    // SDA-16: material shared in a group must surface in that group's Materials list
+    // without a separate upload step, i.e. reading the same rows TWA-06 writes.
+    [Fact]
+    public async Task Sda16_ListGroupMaterials_ForbidsNonMembers()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        var group = new Group { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "Club", Type = GroupType.Club };
+        db.Groups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListGroupMaterials(group.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Sda16_ListGroupMaterials_ReturnsMaterialsSharedInTheGroup()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var student = NewUser(AccountType.Student);
+        db.Users.AddRange(teacher, student);
+        var group = new Group { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "Club", Type = GroupType.Club };
+        db.Groups.Add(group);
+        db.GroupMembers.Add(new GroupMember { Id = Guid.NewGuid(), GroupId = group.Id, UserId = student.Id });
+        db.Materials.Add(new Material { Id = Guid.NewGuid(), GroupId = group.Id, Title = "Slides", FileUrl = "https://example.com/slides.pdf", UploadedBy = teacher.Id, UploadedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListGroupMaterials(group.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var materials = Assert.IsType<List<MaterialDto>>(ok.Value);
+        var entry = Assert.Single(materials);
+        Assert.Equal("Slides", entry.Title);
+    }
 }
