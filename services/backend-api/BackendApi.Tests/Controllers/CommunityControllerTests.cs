@@ -455,4 +455,107 @@ public class CommunityControllerTests
         var entry = Assert.Single(materials);
         Assert.Equal("Slides", entry.Title);
     }
+
+    // API-02: "one class group created per class, every semester... no manual step required."
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_ForbidsNonAdmins()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.ProvisionClassGroups();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_CreatesOneGroupPerSectionAndEnrollsStudents()
+    {
+        await using var db = NewDb();
+        var collegeId = Guid.NewGuid();
+        var admin = NewUser(AccountType.AdminTier, collegeId);
+        var student = NewUser(AccountType.Student, collegeId);
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = collegeId, Name = "CS" };
+        var section = new Section { Id = Guid.NewGuid(), DepartmentId = department.Id, Year = 3, Name = "3rd Year CSE - A" };
+        db.Users.AddRange(admin, student);
+        db.Departments.Add(department);
+        db.Sections.Add(section);
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student.Id });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.ProvisionClassGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ProvisionClassGroupsResponse>(ok.Value);
+        Assert.Equal(1, response.GroupsCreated);
+        Assert.Equal(1, response.MembershipsAdded);
+
+        var group = Assert.Single(await db.Groups.Where(g => g.SectionId == section.Id && g.Type == GroupType.Class).ToListAsync());
+        Assert.Equal("3rd Year CSE - A", group.Name);
+        Assert.True(await db.GroupMembers.AnyAsync(m => m.GroupId == group.Id && m.UserId == student.Id));
+    }
+
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_IsIdempotent_SkipsExistingGroupsAndAvoidsDuplicateMemberships()
+    {
+        await using var db = NewDb();
+        var collegeId = Guid.NewGuid();
+        var admin = NewUser(AccountType.AdminTier, collegeId);
+        var student = NewUser(AccountType.Student, collegeId);
+        var newStudent = NewUser(AccountType.Student, collegeId);
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = collegeId, Name = "CS" };
+        var section = new Section { Id = Guid.NewGuid(), DepartmentId = department.Id, Year = 3, Name = "3rd Year CSE - A" };
+        var existingGroup = new Group { Id = Guid.NewGuid(), CollegeId = collegeId, Name = section.Name, Type = GroupType.Class, SectionId = section.Id, CreatedBy = admin.Id };
+        db.Users.AddRange(admin, student, newStudent);
+        db.Departments.Add(department);
+        db.Sections.Add(section);
+        db.Groups.Add(existingGroup);
+        db.GroupMembers.Add(new GroupMember { Id = Guid.NewGuid(), GroupId = existingGroup.Id, UserId = student.Id });
+        db.SectionEnrollments.AddRange(
+            new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = student.Id },
+            new SectionEnrollment { Id = Guid.NewGuid(), SectionId = section.Id, StudentId = newStudent.Id });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.ProvisionClassGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ProvisionClassGroupsResponse>(ok.Value);
+        Assert.Equal(0, response.GroupsCreated);
+        Assert.Equal(1, response.MembershipsAdded);
+        Assert.Single(await db.Groups.Where(g => g.SectionId == section.Id).ToListAsync());
+        Assert.Equal(2, await db.GroupMembers.CountAsync(m => m.GroupId == existingGroup.Id));
+    }
+
+    // #114 review: an Admin at one college must not provision or re-sync class groups
+    // for another college's sections.
+    [Fact]
+    public async Task Api02_ProvisionClassGroups_DoesNotTouchOtherColleges()
+    {
+        await using var db = NewDb();
+        var adminCollegeId = Guid.NewGuid();
+        var otherCollegeId = Guid.NewGuid();
+        var admin = NewUser(AccountType.AdminTier, adminCollegeId);
+        var otherStudent = NewUser(AccountType.Student, otherCollegeId);
+        var otherDepartment = new Department { Id = Guid.NewGuid(), CollegeId = otherCollegeId, Name = "CS" };
+        var otherSection = new Section { Id = Guid.NewGuid(), DepartmentId = otherDepartment.Id, Year = 1, Name = "1st Year CSE - A" };
+        db.Users.AddRange(admin, otherStudent);
+        db.Departments.Add(otherDepartment);
+        db.Sections.Add(otherSection);
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = otherSection.Id, StudentId = otherStudent.Id });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.ProvisionClassGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<ProvisionClassGroupsResponse>(ok.Value);
+        Assert.Equal(0, response.GroupsCreated);
+        Assert.Equal(0, response.MembershipsAdded);
+        Assert.False(await db.Groups.AnyAsync(g => g.SectionId == otherSection.Id));
+    }
 }

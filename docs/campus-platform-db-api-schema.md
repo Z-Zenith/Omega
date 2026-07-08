@@ -391,6 +391,7 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 |---|---|---|
 | POST | `/groups` | TWA-05, AWA-12 |
 | GET | `/groups` | AWA-06 — institution-wide, gated by `view_all_groups` |
+| POST | `/groups/provision-class-groups` | API-02 — Admin-only, idempotent; no scheduler yet, manually/job-triggered |
 | GET | `/groups/mine` | SDA-16 |
 | POST | `/groups/{id}/posts` | SDA-16 |
 | GET | `/groups/{id}/posts` | TWA-05, SDA-16 |
