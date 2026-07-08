@@ -22,6 +22,20 @@ public record ExternalMarkDto(Guid SubjectId, string SubjectName, string Grade, 
 
 public record MyMarksResponse(List<InternalMarkDto> InternalMarks, List<ExternalMarkDto> ExternalMarks);
 
+// SDA-03/SDA-04
+public record WhitelistSiteDto(Guid Id, string Url, DateTime ApprovedAt);
+
+public record WhitelistResponse(List<WhitelistSiteDto> Sites);
+
+// SDA-08, SEK-03
+public record CreateNoteRequest(string Title, string ContentMarkdown);
+
+public record UpdateNoteRequest(string Title, string ContentMarkdown);
+
+public record NoteDto(Guid Id, string Title, string ContentMarkdown, DateTime CreatedAt, DateTime UpdatedAt);
+
+public record NoteSummaryDto(Guid Id, string Title, DateTime UpdatedAt);
+
 // SDA-11: request/response shapes for the auto-submit-on-exit endpoint
 // (POST /api/v1/assignments/{id}/submissions/auto-submit). SubmissionFormat mirrors the
 // backend's AssignmentType enum, serialized as a string (see Program.cs JsonStringEnumConverter).

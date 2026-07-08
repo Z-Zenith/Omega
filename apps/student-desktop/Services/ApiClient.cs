@@ -81,6 +81,42 @@ public class ApiClient
             ?? throw new ApiException(500, "Empty auto-submit response");
     }
 
+    // SDA-03/SDA-04
+    public async Task<WhitelistResponse> GetWhitelistAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/whitelist");
+        return await response.Content.ReadFromJsonAsync<WhitelistResponse>(JsonOptions)
+            ?? new WhitelistResponse([]);
+    }
+
+    // SDA-08
+    public async Task<List<NoteSummaryDto>> GetMyNotesAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/notes/mine");
+        return await response.Content.ReadFromJsonAsync<List<NoteSummaryDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<NoteDto> GetNoteAsync(Guid noteId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/notes/{noteId}");
+        return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty note response");
+    }
+
+    public async Task<NoteDto> CreateNoteAsync(string title, string contentMarkdown)
+    {
+        var response = await SendAsync(HttpMethod.Post, "/api/v1/notes", new CreateNoteRequest(title, contentMarkdown));
+        return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty note response");
+    }
+
+    public async Task<NoteDto> UpdateNoteAsync(Guid noteId, string title, string contentMarkdown)
+    {
+        var response = await SendAsync(HttpMethod.Patch, $"/api/v1/notes/{noteId}", new UpdateNoteRequest(title, contentMarkdown));
+        return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty note response");
+    }
+
     public async Task LogoutAsync()
     {
         if (Token is null)
