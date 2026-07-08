@@ -26,6 +26,11 @@ public class AssignmentAutoSubmitService(ApiClient apiClient)
 {
     private ActiveAssignmentSession? _session;
 
+    // SDA-22: true while an assignment is open for editing — the single source of truth
+    // both this service (for auto-submit) and the clipboard block (MainWindow) key off,
+    // so there is exactly one notion of "an assignment is currently open" in the app.
+    public bool IsAssignmentOpen => _session is not null;
+
     // Called by an assignment-editing view when the student opens an assignment.
     public void BeginSession(ActiveAssignmentSession session) => _session = session;
 
