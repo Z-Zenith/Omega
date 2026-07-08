@@ -42,6 +42,8 @@ builder.Services.AddScoped<IPermissionService, PermissionService>();
 // Notification Router (shared) — see Services/INotificationRouter.cs.
 builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
 builder.Services.AddSignalR();
+// SDA-13
+builder.Services.AddHostedService<NoLoginAlertHostedService>();
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwtSection["Key"];
