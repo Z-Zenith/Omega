@@ -380,4 +380,84 @@ public class TimetableControllerTests
         var updated = await db.AttendanceRecords.SingleAsync(r => r.StudentId == fixture.Students[0].Id);
         Assert.Equal(AttendanceStatus.Absent, updated.Status);
     }
+
+    // TWA-04
+    [Fact]
+    public async Task Twa04_PerformanceSummary_ForbidsTeacherNotAssignedToSection()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.GetSectionPerformanceSummary(fixture.Slot.SectionId);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Twa04_PerformanceSummary_ComputesOverallAndPerStudentAttendance()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 2);
+        db.TeacherSectionAssignments.Add(new TeacherSectionAssignment { Id = Guid.NewGuid(), TeacherId = teacher.Id, SectionId = fixture.Slot.SectionId, SubjectId = fixture.Slot.SubjectId });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        await controller.MarkAttendance(new MarkAttendanceRequest(fixture.Slot.Id, new DateOnly(2026, 7, 6),
+        [
+            new AttendanceEntryRequest(fixture.Students[0].Id, "Present"),
+            new AttendanceEntryRequest(fixture.Students[1].Id, "Absent"),
+        ]));
+
+        var result = await controller.GetSectionPerformanceSummary(fixture.Slot.SectionId);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var summary = Assert.IsType<SectionPerformanceSummaryDto>(ok.Value);
+        Assert.Equal(50m, summary.OverallAttendancePercentage);
+        Assert.Equal(2, summary.StudentAttendance.Count);
+        Assert.Contains(summary.StudentAttendance, s => s.StudentId == fixture.Students[0].Id && s.AttendancePercentage == 100m);
+        Assert.Contains(summary.StudentAttendance, s => s.StudentId == fixture.Students[1].Id && s.AttendancePercentage == 0m);
+    }
+
+    [Fact]
+    public async Task Twa04_PerformanceSummary_ComputesAverageMarksPerTaughtSubject()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 2);
+        db.TeacherSectionAssignments.Add(new TeacherSectionAssignment { Id = Guid.NewGuid(), TeacherId = teacher.Id, SectionId = fixture.Slot.SectionId, SubjectId = fixture.Slot.SubjectId });
+        db.InternalMarks.Add(new InternalMark { Id = Guid.NewGuid(), StudentId = fixture.Students[0].Id, SubjectId = fixture.Slot.SubjectId, Marks = 80 });
+        db.InternalMarks.Add(new InternalMark { Id = Guid.NewGuid(), StudentId = fixture.Students[1].Id, SubjectId = fixture.Slot.SubjectId, Marks = 60 });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.GetSectionPerformanceSummary(fixture.Slot.SectionId);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var summary = Assert.IsType<SectionPerformanceSummaryDto>(ok.Value);
+        var subjectSummary = Assert.Single(summary.MarksBySubject);
+        Assert.Equal(fixture.Slot.SubjectId, subjectSummary.SubjectId);
+        Assert.Equal(70m, subjectSummary.AverageMarks);
+        Assert.Equal(2, subjectSummary.StudentsGraded);
+    }
+
+    [Fact]
+    public async Task Twa04_PerformanceSummary_NullAttendanceAndMarks_WhenNoDataYet()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+        db.TeacherSectionAssignments.Add(new TeacherSectionAssignment { Id = Guid.NewGuid(), TeacherId = teacher.Id, SectionId = fixture.Slot.SectionId, SubjectId = fixture.Slot.SubjectId });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.GetSectionPerformanceSummary(fixture.Slot.SectionId);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var summary = Assert.IsType<SectionPerformanceSummaryDto>(ok.Value);
+        Assert.Null(summary.OverallAttendancePercentage);
+        Assert.Null(summary.MarksBySubject.Single().AverageMarks);
+    }
 }

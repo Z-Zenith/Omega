@@ -40,3 +40,15 @@ public record MarkAttendanceResponse(Guid ClassSessionId, DateOnly SessionDate, 
 public record SubmitSectionFeedbackRequest(int Rating, string? Comments);
 
 public record SectionFeedbackDto(Guid Id, Guid SectionId, string SectionName, int Rating, string? Comments, DateTime SubmittedAt);
+
+// TWA-04
+public record StudentAttendanceDto(Guid StudentId, string StudentName, decimal? AttendancePercentage);
+
+public record SubjectMarksSummaryDto(Guid SubjectId, string SubjectName, decimal? AverageMarks, int StudentsGraded);
+
+public record SectionPerformanceSummaryDto(
+    Guid SectionId,
+    string SectionName,
+    decimal? OverallAttendancePercentage,
+    List<StudentAttendanceDto> StudentAttendance,
+    List<SubjectMarksSummaryDto> MarksBySubject);
