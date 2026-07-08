@@ -4,10 +4,17 @@ model
 # Mirrors architecture doc Section 9's ReBAC design: College is the tenant
 # boundary, RoleBinding is either global (within the College) or scoped to a
 # Department, and PermissionGrant is an additive/time-bound override on top
-# of role defaults. Expiry on PermissionGrant-style tuples (add_external_marks,
-# create_timetable grants) is enforced by Backend API syncing tuples against
-# permission_grants.expires_at — OpenFGA itself just answers "does this tuple
-# exist right now."
+# of role defaults. Expiry on the two grant-backed relations
+# (add_external_marks_grant, create_timetable_grant) is enforced by OpenFGA
+# itself via the non_expired condition (declared at the bottom of this file,
+# where the DSL requires conditions to appear) — Backend API binds each
+# tuple's grant_expires_at from permission_grants.expires_at at write time,
+# and passes the current time as Check context, so an expired grant is denied
+# even if the tuple is never explicitly deleted (e.g. a missed cleanup job
+# can't silently leave an expired grant active). A grant with no expiry
+# (expires_at is null) is written as a plain, unconditioned tuple instead —
+# the `[user, user with non_expired]` type restriction on each relation below
+# allows both forms.
 
 type user
 
@@ -40,9 +47,11 @@ type department
 
     # PermissionGrant-backed relations — additive only, no role grants these
     # by default (add_external_marks per TWA-17's spec; create_timetable can
-    # also be extended to a specific Lecturer per TWA-19).
-    define add_external_marks_grant: [user]
-    define create_timetable_grant: [user]
+    # also be extended to a specific Lecturer per TWA-19). Either form is
+    # accepted: a plain tuple (permission_grants.expires_at was null) or one
+    # bound to non_expired (expires_at was set) — see the condition doc above.
+    define add_external_marks_grant: [user, user with non_expired]
+    define create_timetable_grant: [user, user with non_expired]
 
     define create_group: lecturer or hod or admin from college
     define create_event: lecturer or hod or admin from college
@@ -51,3 +60,7 @@ type department
     define approve_external_marks: hod
     define create_timetable: hod or create_timetable_grant or admin from college
     define view_department_reports: hod
+
+condition non_expired(current_time: timestamp, grant_expires_at: timestamp) {
+  current_time < grant_expires_at
+}
