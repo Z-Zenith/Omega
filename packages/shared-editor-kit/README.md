@@ -8,7 +8,7 @@ Public TypeScript interface for the **Shared Editor Kit (SEK)** — the cross-co
 
 | ID | Feature | Status in this package |
 |---|---|---|
-| [SEK-01](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Code editor (C, C++, Python, Java, .NET, HTML, CSS, JS/TS, Node, SQL, JSON, YAML) | Interface only |
+| [SEK-01](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Code editor (C, C++, Python, Java, .NET, HTML, CSS, JS/TS, Node, SQL, JSON, YAML) | **Implemented** — `CodeEditor` + `isSupportedLanguage` |
 | [SEK-02](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Document viewer & annotator (PDF/PPTX/DOCX, highlights/textboxes/ink, OCR) | Interface only |
 | [SEK-03](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Markdown notes (Obsidian-style linked notes) | **Implemented** — `NotesEditor` + `extractOutgoingLinks` |
 | [SEK-04](../docs/Campus%20platform%20architecture.md#features--shared-editor-kit-sek) | Built-in image search (inside the notes editor) | Interface only |
@@ -70,5 +70,10 @@ pnpm test          # typecheck, then runs runtime tests (tests/*.test.ts) via `n
 
 Runtime tests use Node's built-in test runner directly against `.ts` sources (Node 22+ type
 stripping) rather than adding a separate test-framework dependency — see
-`tests/notes.linkExtraction.test.ts` for the pattern. Component-level (React rendering) tests
-for SEK-01/02/04 land alongside those implementations when they're built.
+`tests/notes.linkExtraction.test.ts` and `tests/code-editor.logic.test.ts` for the pattern.
+Framework-agnostic logic (link extraction, language-support guards) is unit-tested this way;
+full React rendering tests would need a DOM/testing-library dependency this package doesn't
+carry yet. `tests/contract.smoke.ts` only verifies that the public exports (types and values)
+resolve through the barrel — it is not a substitute for rendering coverage. Component-level
+(React rendering) tests for SEK-01/02/04 land as a follow-up once a DOM-testing dependency is
+added to the package.
