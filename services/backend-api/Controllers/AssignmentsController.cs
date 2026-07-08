@@ -15,7 +15,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices) : ControllerBase
+public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices, ICopyleaksClient copyleaks, IConfiguration configuration) : ControllerBase
 {
     // TWA-07. Gated by "caller teaches this subject" rather than a permission code — no
     // "create_assignment" code exists in the seeded catalog, and adding one is an
@@ -243,8 +243,81 @@ public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices
         return Ok(ToSubmissionDto(submission));
     }
 
+    // AIS-02: kicks off an async Copyleaks scan (see CopyleaksClient) — unlike AIS-03's
+    // copy-check, the similarity score isn't available synchronously; it arrives later
+    // via WebhooksController.CopyleaksResult. Gated the same as copy-check: the
+    // assignment's own teacher, or Admin. Changed from the original stub's GET on
+    // /plagiarism-report to a separate POST /plagiarism-check that triggers the scan —
+    // /plagiarism-report (below) stays a GET since it now just reads whatever's persisted.
+    [HttpPost("submissions/{id}/plagiarism-check")]
+    public async Task<IActionResult> RequestPlagiarismCheck(Guid id)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+
+        var submission = await db.Submissions.Include(s => s.Assignment).FirstOrDefaultAsync(s => s.Id == id);
+        if (submission is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && submission.Assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        var scanId = id.ToString("N");
+        try
+        {
+            var secret = configuration["Copyleaks:WebhookSecret"] ?? "";
+            var webhookUrlTemplate =
+                $"{Request.Scheme}://{Request.Host}/api/v1/webhooks/copyleaks/{scanId}/{{status}}?secret={Uri.EscapeDataString(secret)}";
+            await copyleaks.SubmitScanAsync(scanId, submission.ContentUrl, webhookUrlTemplate);
+        }
+        catch (ExternalServiceNotConfiguredException)
+        {
+            return StatusCode(503, new
+            {
+                error = "service_not_configured",
+                message = "Internet plagiarism checking is not configured for this deployment (missing Copyleaks credentials).",
+            });
+        }
+
+        return Accepted(new PlagiarismCheckAcceptedDto(id, scanId, "pending"));
+    }
+
+    // Never shown to the submitting student (AIS-02 acceptance criterion) — enforced here
+    // by the same teacher-or-Admin gate as the trigger endpoint above, not by hiding an
+    // otherwise-reachable route.
     [HttpGet("submissions/{id}/plagiarism-report")]
-    public IActionResult PlagiarismReport(Guid id) => StatusCode(501, new { feature = "AIS-02", status = "not_implemented" });
+    public async Task<IActionResult> PlagiarismReport(Guid id)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+
+        var submission = await db.Submissions.Include(s => s.Assignment).FirstOrDefaultAsync(s => s.Id == id);
+        if (submission is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && submission.Assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        var report = await db.PlagiarismReports.FirstOrDefaultAsync(r => r.SubmissionId == id);
+        if (report is null)
+        {
+            return Ok(new PlagiarismReportStatusDto(id, "pending"));
+        }
+
+        return Ok(ToPlagiarismDto(report));
+    }
 
     [HttpGet("submissions/{id}/ai-detection")]
     public IActionResult AiDetection(Guid id) => StatusCode(501, new { feature = "AIS-05", status = "not_implemented" });
@@ -425,6 +498,11 @@ public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices
 
     private static SubmissionDto ToSubmissionDto(Submission s) => new(
         s.Id, s.AssignmentId, s.StudentId, s.ContentUrl, s.SubmittedAt, s.IsLate, s.IsAutosubmitted);
+
+    private static PlagiarismReportDto ToPlagiarismDto(PlagiarismReport r) => new(
+        r.Id, r.SubmissionId, r.SimilarityScore, r.CopyleaksScanId,
+        string.IsNullOrEmpty(r.MatchedSources) ? [] : JsonSerializer.Deserialize<List<string>>(r.MatchedSources) ?? [],
+        r.CheckedAt);
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
 

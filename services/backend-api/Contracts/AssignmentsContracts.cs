@@ -57,3 +57,19 @@ public record AutogradeSuggestionDto(
 public record ConfirmGradeRequest(Guid SuggestionId);
 
 public record ConfirmedGradeDto(Guid Id, Guid SubmissionId, decimal SuggestedGrade, bool ConfirmedByTeacher, DateTime? ConfirmedAt);
+
+// AIS-02: internet plagiarism check via Copyleaks. Copyleaks scans asynchronously, so
+// requesting a check only accepts the request — the score arrives later via
+// WebhooksController.CopyleaksResult, hence the separate "status" DTOs for the pending
+// state vs. the eventual persisted report.
+public record PlagiarismCheckAcceptedDto(Guid SubmissionId, string ScanId, string Status);
+
+public record PlagiarismReportStatusDto(Guid SubmissionId, string Status);
+
+public record PlagiarismReportDto(
+    Guid Id,
+    Guid SubmissionId,
+    decimal SimilarityScore,
+    string? CopyleaksScanId,
+    IReadOnlyList<string> MatchedSources,
+    DateTime CheckedAt);

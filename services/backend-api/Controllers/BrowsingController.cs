@@ -15,7 +15,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class BrowsingController(AppDbContext db, IAiServicesClient aiServices) : ControllerBase
+public class BrowsingController(AppDbContext db, IAiServicesClient aiServices, IPermissionService permissions) : ControllerBase
 {
     // SDA-03: whitelist_sites is college-scoped (not per-class) — this is the already-
     // decided design that SDA-04's "approval applies institution-wide" acceptance
@@ -174,8 +174,80 @@ public class BrowsingController(AppDbContext db, IAiServicesClient aiServices) :
             new WhitelistSiteDto(site!.Id, site.Url, site.ApprovedAt)));
     }
 
+    // AIS-01: "a role without that permission cannot see the summary anywhere, including
+    // in the student's own profile view" — the permission check applies unconditionally,
+    // there's no self-view exception even for the student the summary is about.
     [HttpGet("students/{id}/browsing-summary")]
-    public IActionResult BrowsingSummary(Guid id) => StatusCode(501, new { feature = "AIS-01", status = "not_implemented" });
+    public async Task<ActionResult<BrowsingSummaryReportDto>> BrowsingSummary(Guid id)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (!await permissions.HasPermissionAsync(caller.Id, "view_browsing_history"))
+        {
+            return Forbid();
+        }
+
+        var student = await db.Users.FindAsync(id);
+        if (student is null)
+        {
+            return NotFound();
+        }
+
+        var visits = await db.BrowsingHistories
+            .Where(v => v.StudentId == id)
+            .OrderByDescending(v => v.VisitedAt)
+            .ToListAsync();
+
+        var visitInputs = visits.Select(v => new BrowsingVisitInput(v.Url, v.VisitedAt, v.DurationSeconds)).ToList();
+        var summaryText = await aiServices.SummarizeBrowsingAsync(visitInputs);
+
+        var summary = new BrowsingHistorySummary
+        {
+            Id = Guid.NewGuid(),
+            StudentId = id,
+            SummaryText = summaryText,
+            GeneratedAt = DateTime.UtcNow,
+        };
+        db.BrowsingHistorySummaries.Add(summary);
+        await db.SaveChangesAsync();
+
+        return Ok(new BrowsingSummaryReportDto(summary.Id, summary.SummaryText, summary.GeneratedAt));
+    }
+
+    // AIS-01: logs a single page visit. The whitelisted browser (SDA-03/04) is expected
+    // to call this on each navigation — feeds the raw input the summary above reads.
+    [HttpPost("browsing-history")]
+    public async Task<IActionResult> LogBrowsingVisit(LogBrowsingVisitRequest request)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+        if (caller.AccountType != AccountType.Student)
+        {
+            return Forbid();
+        }
+        if (string.IsNullOrWhiteSpace(request.Url))
+        {
+            return BadRequest(new { error = "url_required", message = "URL must not be empty." });
+        }
+
+        db.BrowsingHistories.Add(new BrowsingHistory
+        {
+            Id = Guid.NewGuid(),
+            StudentId = caller.Id,
+            Url = request.Url.Trim(),
+            VisitedAt = DateTime.UtcNow,
+            DurationSeconds = request.DurationSeconds,
+        });
+        await db.SaveChangesAsync();
+
+        return NoContent();
+    }
 
     // SDA-25 (Track 1) — telemetry ingestion isn't this endpoint's/track's job; AIS-07
     // below only reads whatever usage_telemetry rows already exist.

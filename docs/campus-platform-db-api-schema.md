@@ -274,6 +274,7 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 
 **`whitelist_sites`** — `id`, `college_id` FK, `url`, `approved_at` (SDA-03; institution-wide once approved per SDA-04)
 **`whitelist_requests`** — `id`, `url`, `requested_by` FK → users, `status` enum(pending, approved, rejected), `reviewed_by` FK nullable (SDA-04)
+**`browsing_history`** — `id`, `student_id` FK, `url`, `visited_at`, `duration_seconds` nullable (AIS-01 — raw per-visit log the summary below is generated from)
 **`browsing_history_summaries`** — `id`, `student_id` FK, `summary_text`, `generated_at` (AIS-01 — visibility gated by `view_browsing_history` permission at the API layer, not by a column here)
 
 ### 1.9 Shared Editor Kit (metadata only — file bytes live in GCS)
@@ -356,7 +357,9 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 |---|---|---|
 | POST | `/assignments` | TWA-07 |
 | POST | `/assignments/{id}/submissions` | SDA-10, SDA-11 |
-| GET | `/submissions/{id}/plagiarism-report` | AIS-02 (not yet implemented — needs Copyleaks credentials) |
+| POST | `/submissions/{id}/plagiarism-check` | AIS-02 — kicks off an async Copyleaks scan; new route (the original stub was a single GET). Returns 503 if Copyleaks credentials aren't configured for this deployment. |
+| GET | `/submissions/{id}/plagiarism-report` | AIS-02 — reads whatever's persisted; returns `{ status: "pending" }` until the Copyleaks webhook below delivers a result |
+| POST | `/webhooks/copyleaks/{scanId}/{status}?secret=` | AIS-02 — Copyleaks' async scan-completion callback (unauthenticated by necessity; `secret` must match `Copyleaks:WebhookSecret`) |
 | POST | `/assignments/{id}/copy-check` | AIS-03 — was GET in the original stub; changed to POST since it triggers a fresh analysis and persists `copy_check_flags` rows, not just a fetch |
 | GET | `/submissions/{id}/ai-detection` | AIS-05 (not yet implemented — needs Pangram credentials) |
 | POST | `/submissions/{id}/autograde-suggestion` | AIS-04 — was a parameterless GET in the original stub; changed to POST carrying the rubric (no `Rubric` table exists, so the caller supplies it ad hoc) |
@@ -418,7 +421,8 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | GET | `/whitelist` | SDA-03 |
 | POST | `/whitelist/requests` | SDA-04 |
 | POST | `/whitelist/requests/{id}/approve` | SDA-04 |
-| GET | `/students/{id}/browsing-summary` | AIS-01 (permission-gated; not yet implemented — needs a raw browsing-visit-log table, a DB schema change out of scope for a unilateral PR) |
+| GET | `/students/{id}/browsing-summary` | AIS-01 — permission-gated (`view_browsing_history`, no self-view exception); generates and persists a fresh summary each call |
+| POST | `/browsing-history` | AIS-01 — logs one page visit (students only); feeds the summary above |
 | POST | `/telemetry` | SDA-25 (write-only, scoped windows; not yet implemented — Track 1) |
 | POST | `/suspicious-flags?classSessionId=\|assignmentId=` | AIS-07 — was a parameterless GET in the original stub; changed to POST scoped by query param since it triggers a fresh analysis and persists `suspicious_flags` rows, and needs a window to scope to |
 

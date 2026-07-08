@@ -20,6 +20,8 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<AutogradeSuggestion> AutogradeSuggestions { get; set; }
 
+    public virtual DbSet<BrowsingHistory> BrowsingHistories { get; set; }
+
     public virtual DbSet<BrowsingHistorySummary> BrowsingHistorySummaries { get; set; }
 
     public virtual DbSet<ClassSession> ClassSessions { get; set; }
@@ -173,6 +175,16 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
 
             entity.HasOne(d => d.Submission).WithMany(p => p.AutogradeSuggestions).HasConstraintName("autograde_suggestions_submission_id_fkey");
+        });
+
+        modelBuilder.Entity<BrowsingHistory>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("browsing_history_pkey");
+
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.VisitedAt).HasDefaultValueSql("now()");
+
+            entity.HasOne(d => d.Student).WithMany(p => p.BrowsingHistories).HasConstraintName("browsing_history_student_id_fkey");
         });
 
         modelBuilder.Entity<BrowsingHistorySummary>(entity =>
