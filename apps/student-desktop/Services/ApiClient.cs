@@ -71,6 +71,13 @@ public class ApiClient
             ?? new MyMarksResponse([], []);
     }
 
+    // SDA-18
+    public async Task<List<MySubjectDto>> GetMySubjectsAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/subjects/mine");
+        return await response.Content.ReadFromJsonAsync<List<MySubjectDto>>(JsonOptions) ?? [];
+    }
+
     // SDA-11: called by AssignmentAutoSubmitService when the app detects exit or
     // focus-loss during an active assignment window.
     public async Task<SubmissionDto> AutoSubmitAssignmentAsync(Guid assignmentId, string contentUrl, string submissionFormat)
