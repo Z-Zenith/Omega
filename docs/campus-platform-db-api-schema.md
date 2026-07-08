@@ -408,6 +408,7 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | Method | Path | Feature |
 |---|---|---|
 | POST | `/fees/links` | AWA-04 |
+| POST | `/fees/reminders?daysBefore=` | AWA-05 — writes to the shared `notifications` table; no scheduler yet, Admin/Finance-triggered for now |
 | POST | `/fees/{id}/pay` | PRT-03 |
 | GET | `/fees/ward/{studentId}` | PRT-02 |
 

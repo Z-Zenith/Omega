@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
@@ -102,6 +103,71 @@ public class FeesController(AppDbContext db, IPermissionService permissions) : C
         await db.SaveChangesAsync();
 
         return Ok(new PayFeeResponse(fee.Id, FeeStatus.Paid.ToString(), processedAt, gatewayTxnId));
+    }
+
+    // AWA-05: "reminder fires at a configurable number of days before the due date" —
+    // daysBefore is that configuration. No scheduler exists yet to call this
+    // automatically (that's separate infra); exposed as an Admin/Finance-triggered
+    // action for now. Writes directly to the existing shared `notifications` table
+    // rather than introducing a new "Notification Router" abstraction — that's larger
+    // shared infrastructure Track 1 also depends on and needs its own coordination
+    // (CLAUDE.md: the Notification Router is shared code).
+    [HttpPost("reminders")]
+    public async Task<ActionResult<SendFeeRemindersResponse>> SendPaymentReminders([FromQuery] int daysBefore = 7)
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "manage_fees"))
+        {
+            return Forbid();
+        }
+        if (daysBefore < 0)
+        {
+            return BadRequest(new { error = "invalid_days_before", message = "daysBefore must not be negative." });
+        }
+
+        var targetDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(daysBefore));
+        var dueSoon = await db.FeeRecords
+            .Where(f => f.Status == FeeStatus.Pending && f.DueDate == targetDate)
+            .ToListAsync();
+
+        var notifiedParentIds = new List<Guid>();
+        foreach (var fee in dueSoon)
+        {
+            var parentIds = await db.ParentWards
+                .Where(w => w.StudentId == fee.StudentId)
+                .Select(w => w.ParentUserId)
+                .ToListAsync();
+
+            foreach (var parentId in parentIds)
+            {
+                var payloadMarker = fee.Id.ToString();
+                var alreadyReminded = await db.Notifications
+                    .AnyAsync(n => n.RecipientId == parentId && n.Payload.Contains(payloadMarker));
+                if (alreadyReminded)
+                {
+                    continue;
+                }
+
+                var payload = JsonSerializer.Serialize(new
+                {
+                    type = "FeeReminder",
+                    feeRecordId = fee.Id,
+                    amount = fee.Amount,
+                    dueDate = fee.DueDate,
+                });
+                db.Notifications.Add(new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    RecipientId = parentId,
+                    Payload = payload,
+                    CreatedAt = DateTime.UtcNow,
+                });
+                notifiedParentIds.Add(parentId);
+            }
+        }
+        await db.SaveChangesAsync();
+
+        return Ok(new SendFeeRemindersResponse(dueSoon.Count, notifiedParentIds));
     }
 
     // PRT-02

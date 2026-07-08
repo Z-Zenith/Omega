@@ -227,4 +227,87 @@ public class FeesControllerTests
         Assert.NotEqual(firstResponse.PaymentLink, secondResponse.PaymentLink);
         Assert.Equal(2, await db.FeeRecords.CountAsync(f => f.StudentId == student.Id));
     }
+
+    // AWA-05: "reminder fires at a configurable number of days before the due date".
+    [Fact]
+    public async Task Awa05_SendPaymentReminders_ForbidsCallersWithoutManageFeesPermission()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.Add(teacher);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.SendPaymentReminders();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Awa05_SendPaymentReminders_NotifiesParentsOfFeesDueOnTheTargetDate()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student);
+        var parent = NewUser(AccountType.Parent);
+        var dueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7));
+        db.Users.AddRange(admin, student, parent);
+        db.PermissionGrants.Add(GrantManageFees(admin.Id));
+        db.ParentWards.Add(new ParentWard { Id = Guid.NewGuid(), ParentUserId = parent.Id, StudentId = student.Id });
+        db.FeeRecords.Add(new FeeRecord { Id = Guid.NewGuid(), StudentId = student.Id, Amount = 5000m, DueDate = dueDate, Status = FeeStatus.Pending });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.SendPaymentReminders(daysBefore: 7);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<SendFeeRemindersResponse>(ok.Value);
+        Assert.Equal(1, response.FeesDueSoon);
+        Assert.Equal(parent.Id, Assert.Single(response.NotifiedParentIds));
+        Assert.Single(await db.Notifications.Where(n => n.RecipientId == parent.Id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Awa05_SendPaymentReminders_DoesNotDuplicateAnAlreadySentReminder()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student);
+        var parent = NewUser(AccountType.Parent);
+        var dueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7));
+        var fee = new FeeRecord { Id = Guid.NewGuid(), StudentId = student.Id, Amount = 5000m, DueDate = dueDate, Status = FeeStatus.Pending };
+        db.Users.AddRange(admin, student, parent);
+        db.PermissionGrants.Add(GrantManageFees(admin.Id));
+        db.ParentWards.Add(new ParentWard { Id = Guid.NewGuid(), ParentUserId = parent.Id, StudentId = student.Id });
+        db.FeeRecords.Add(fee);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        await controller.SendPaymentReminders(daysBefore: 7);
+        await controller.SendPaymentReminders(daysBefore: 7);
+
+        Assert.Single(await db.Notifications.Where(n => n.RecipientId == parent.Id).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Awa05_SendPaymentReminders_IgnoresFeesNotDueOnTheTargetDate()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        var student = NewUser(AccountType.Student);
+        var parent = NewUser(AccountType.Parent);
+        db.Users.AddRange(admin, student, parent);
+        db.PermissionGrants.Add(GrantManageFees(admin.Id));
+        db.ParentWards.Add(new ParentWard { Id = Guid.NewGuid(), ParentUserId = parent.Id, StudentId = student.Id });
+        db.FeeRecords.Add(new FeeRecord { Id = Guid.NewGuid(), StudentId = student.Id, Amount = 5000m, DueDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)), Status = FeeStatus.Pending });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.SendPaymentReminders(daysBefore: 7);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<SendFeeRemindersResponse>(ok.Value);
+        Assert.Equal(0, response.FeesDueSoon);
+        Assert.Empty(await db.Notifications.ToListAsync());
+    }
 }
