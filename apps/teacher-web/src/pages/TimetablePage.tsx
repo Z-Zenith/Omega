@@ -16,7 +16,7 @@ export function TimetablePage() {
   const queryClient = useQueryClient()
 
   const timetable = useQuery({ queryKey: ['timetable', 'mine'], queryFn: getMyTimetable })
-  const { activeSlot } = useActiveSection()
+  const { activeSlot, sectionName, isManualOverride } = useActiveSection()
 
   // A teacher may only rate sections they've actually taught — approximated here by
   // "appears in my own timetable" (TWA-12), same set the backend re-validates against
@@ -56,7 +56,12 @@ export function TimetablePage() {
           <CardDescription>Reflects the latest Admin-approved version (TWA-10).</CardDescription>
         </CardHeader>
         <CardContent>
-          {activeSlot && (
+          {isManualOverride && sectionName && (
+            <p className="mb-3 text-sm">
+              Viewing <span className="font-medium">{sectionName}</span> (manually switched — TWA-02).
+            </p>
+          )}
+          {!isManualOverride && activeSlot && (
             <p className="mb-3 text-sm">
               Currently teaching <span className="font-medium">{activeSlot.sectionName}</span> —{' '}
               {activeSlot.subjectName} (TWA-01).
