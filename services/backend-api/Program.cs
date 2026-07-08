@@ -48,6 +48,16 @@ builder.Services.AddHttpClient<IAiServicesClient, AiServicesClient>(client =>
     client.BaseAddress = new Uri(baseUrl);
 });
 
+// AIS-02: Copyleaks — external, credentialed (Copyleaks:Email/ApiKey/WebhookSecret).
+// No default base URL fallback: an empty ApiKey/Email already fails closed inside
+// CopyleaksClient via ExternalServiceNotConfiguredException, so there's no safe
+// "local dev" default the way AiServices:BaseUrl has one.
+builder.Services.AddHttpClient<ICopyleaksClient, CopyleaksClient>(client =>
+{
+    var baseUrl = builder.Configuration["Copyleaks:BaseUrl"] ?? "https://api.copyleaks.com";
+    client.BaseAddress = new Uri(baseUrl);
+});
+
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
