@@ -4,6 +4,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Hubs;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -12,7 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers()
+builder.Services.AddControllers(options => options.Filters.Add<SessionActiveFilter>())
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
@@ -38,6 +39,7 @@ builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<ITotpService, TotpService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
+builder.Services.AddScoped<SessionActiveFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
 // Notification Router (shared) — see Services/INotificationRouter.cs.
 builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
@@ -89,6 +91,13 @@ builder.Services
     });
 builder.Services.AddAuthorization();
 
+// PRT-01 / SDA-02 / TWA-03 login endpoints authenticate with weak or guessable credentials
+// (roll number + DOB for parents; no lockout otherwise) — rate limit by caller IP so a
+// script can't brute-force the DOB/password space. Applied via
+// [EnableRateLimiting(RateLimiterPolicies.Auth)] on each login action rather than globally,
+// so it doesn't throttle normal authenticated traffic.
+builder.Services.AddRateLimiter(RateLimiterPolicies.ConfigureAuth);
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -98,6 +107,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();
