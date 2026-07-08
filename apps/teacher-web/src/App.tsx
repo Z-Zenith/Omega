@@ -7,6 +7,7 @@ import { EventsPage } from '@/pages/EventsPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
+import { MaterialsPage } from '@/pages/MaterialsPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -25,6 +26,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/events">Events</Link>
           <Link to="/marks">Marks</Link>
           <Link to="/messages">Messages</Link>
+          <Link to="/materials">Materials</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>{fullName}</span>
@@ -90,6 +92,16 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <MessagesPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/materials"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <MaterialsPage />
                 </Shell>
               </RequireAuth>
             }

@@ -216,6 +216,24 @@ export function submitInternalMark(mark: {
   })
 }
 
+// TWA-06 — material upload. Backend: CommunityController.UploadMaterial (already on main).
+export interface MaterialDto {
+  id: string
+  title: string
+  fileUrl: string
+  subjectId: string | null
+  groupId: string | null
+  uploadedBy: string
+  uploadedAt: string
+}
+
+export function uploadMaterial(material: { title: string; fileUrl: string; subjectId: string | null; groupId: string | null }) {
+  return request<MaterialDto>('/materials', {
+    method: 'POST',
+    body: JSON.stringify(material),
+  })
+}
+
 // DMS-01 / TWA-18 — thin adapters from the shared Direct Messaging package's
 // embedder callbacks (Result<T, DmsError>) onto this app's fetch client
 // (which throws ApiError). DMS owns no persistence or auth of its own; this
