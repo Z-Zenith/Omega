@@ -12,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers()
+builder.Services.AddControllers(options => options.Filters.Add<SessionActiveFilter>())
     .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
@@ -38,6 +38,7 @@ builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<ITotpService, TotpService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
+builder.Services.AddScoped<SessionActiveFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
 // Notification Router (shared) — see Services/INotificationRouter.cs.
 builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
