@@ -8,6 +8,7 @@ import { EventsPage } from '@/pages/EventsPage'
 import { RolesPage } from '@/pages/RolesPage'
 import { CreateAccountPage } from '@/pages/CreateAccountPage'
 import { StudentRecordPage } from '@/pages/StudentRecordPage'
+import { CreateGroupPage } from '@/pages/CreateGroupPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -46,6 +47,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/events">Events</Link>
           {canManageRoles && <Link to="/roles">Roles & Permissions</Link>}
           <Link to="/accounts/new">Create account</Link>
+          <Link to="/groups/new">Create group</Link>
           <Link to="/students">Student Records</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -103,6 +105,16 @@ function App() {
             <RequireAuth>
               <Shell>
                 <CreateAccountPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/groups/new"
+          element={
+            <RequireAuth>
+              <Shell>
+                <CreateGroupPage />
               </Shell>
             </RequireAuth>
           }
