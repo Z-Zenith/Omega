@@ -48,10 +48,13 @@ services:
     restart: unless-stopped
     environment:
       ConnectionStrings__Campus: "Host=postgres;Port=5432;Database=campus;Username=campus;Password=campus_dev"
+      AiServices__BaseUrl: "http://ai-services:8000"
     ports:
       - "8080:8080"
     depends_on:
       postgres:
+        condition: service_healthy
+      ai-services:
         condition: service_healthy
 
   authz:

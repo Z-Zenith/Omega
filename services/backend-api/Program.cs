@@ -39,6 +39,15 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
 
+// AIS-03/04/07: self-hosted AI Services container (services/ai-services, FastAPI).
+// Falls back to the docker-compose service name for the default so a local
+// (non-Docker) `dotnet run` still points somewhere sane via the published port mapping.
+builder.Services.AddHttpClient<IAiServicesClient, AiServicesClient>(client =>
+{
+    var baseUrl = builder.Configuration["AiServices:BaseUrl"] ?? "http://localhost:8000";
+    client.BaseAddress = new Uri(baseUrl);
+});
+
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
