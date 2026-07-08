@@ -356,11 +356,11 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 |---|---|---|
 | POST | `/assignments` | TWA-07 |
 | POST | `/assignments/{id}/submissions` | SDA-10, SDA-11 |
-| GET | `/submissions/{id}/plagiarism-report` | AIS-02 |
-| GET | `/assignments/{id}/copy-check` | AIS-03 |
-| GET | `/submissions/{id}/ai-detection` | AIS-05 |
-| GET | `/submissions/{id}/autograde-suggestion` | AIS-04 |
-| POST | `/submissions/{id}/grade` | teacher confirms/edits suggested grade |
+| GET | `/submissions/{id}/plagiarism-report` | AIS-02 (not yet implemented — needs Copyleaks credentials) |
+| POST | `/assignments/{id}/copy-check` | AIS-03 — was GET in the original stub; changed to POST since it triggers a fresh analysis and persists `copy_check_flags` rows, not just a fetch |
+| GET | `/submissions/{id}/ai-detection` | AIS-05 (not yet implemented — needs Pangram credentials) |
+| POST | `/submissions/{id}/autograde-suggestion` | AIS-04 — was a parameterless GET in the original stub; changed to POST carrying the rubric (no `Rubric` table exists, so the caller supplies it ad hoc) |
+| POST | `/submissions/{id}/grade` | teacher confirms a specific autograde suggestion (bookkeeping only — publishing marks is still via `POST /marks/internal`, TWA-16) |
 
 ### Marks
 | Method | Path | Feature |
@@ -418,9 +418,9 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | GET | `/whitelist` | SDA-03 |
 | POST | `/whitelist/requests` | SDA-04 |
 | POST | `/whitelist/requests/{id}/approve` | SDA-04 |
-| GET | `/students/{id}/browsing-summary` | AIS-01 (permission-gated) |
-| POST | `/telemetry` | SDA-25 (write-only, scoped windows) |
-| GET | `/suspicious-flags` | AIS-07 |
+| GET | `/students/{id}/browsing-summary` | AIS-01 (permission-gated; not yet implemented — needs a raw browsing-visit-log table, a DB schema change out of scope for a unilateral PR) |
+| POST | `/telemetry` | SDA-25 (write-only, scoped windows; not yet implemented — Track 1) |
+| POST | `/suspicious-flags?classSessionId=\|assignmentId=` | AIS-07 — was a parameterless GET in the original stub; changed to POST scoped by query param since it triggers a fresh analysis and persists `suspicious_flags` rows, and needs a window to scope to |
 
 ### Messaging & Notifications
 | Method | Path | Feature |
