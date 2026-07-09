@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
@@ -206,15 +207,61 @@ public class MessagingController(AppDbContext db) : ControllerBase
         return ((normalizedPage - 1) * normalizedSize, normalizedSize);
     }
 
-    // Notification Router (shared)
+    // Notification Router (shared) — the caller's own notifications, most recent first
+    // (matches the idx_notifications_recipient index's (recipient_id, created_at DESC)
+    // ordering), paginated. Always scoped to the authenticated caller — never an
+    // arbitrary userId — so one account can never read another's notifications.
     [HttpGet("notifications")]
-    public IActionResult ListNotifications() => StatusCode(501, new { feature = "Notification Router", status = "not_implemented" });
+    public async Task<ActionResult<NotificationsPageResponse>> ListNotifications([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var userId = CurrentUserId();
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize is < 1 or > 100 ? 20 : pageSize;
+
+        var query = db.Notifications.Where(n => n.RecipientId == userId);
+        var totalCount = await query.CountAsync();
+
+        var notifications = await query
+            .OrderByDescending(n => n.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return Ok(new NotificationsPageResponse(notifications.Select(ToDto).ToList(), page, pageSize, totalCount));
+    }
+
+    // Notification Router (shared) — marks one of the caller's own notifications read.
+    // Idempotent: re-marking an already-read notification just returns its existing
+    // readAt rather than erroring or clobbering the original read time. Ownership check
+    // collapses "doesn't exist" and "isn't yours" into the same 404, same pattern used
+    // elsewhere in this codebase (e.g. FeesController.Pay) to avoid leaking existence.
+    [HttpPost("notifications/{id}/read")]
+    public async Task<ActionResult<MarkNotificationReadResponse>> MarkNotificationRead(Guid id)
+    {
+        var userId = CurrentUserId();
+        var notification = await db.Notifications.FindAsync(id);
+        if (notification is null || notification.RecipientId != userId)
+        {
+            return NotFound();
+        }
+
+        notification.ReadAt ??= DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return Ok(new MarkNotificationReadResponse(notification.Id, notification.ReadAt!.Value));
+    }
 
     private static MessageThreadResponse ToResponse(MessageThread thread) =>
         new(thread.Id, thread.StudentId, thread.TeacherId, thread.CreatedAt);
 
     private static MessageResponse ToResponse(Message message) =>
         new(message.Id, message.ThreadId, message.SenderId, message.Content, message.SentAt, message.ReadAt);
+
+    private static NotificationDto ToDto(Notification n)
+    {
+        using var doc = JsonDocument.Parse(n.Payload);
+        return new NotificationDto(n.Id, n.Type.ToString(), doc.RootElement.Clone(), n.CreatedAt, n.ReadAt, n.ReadAt is not null);
+    }
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
 
