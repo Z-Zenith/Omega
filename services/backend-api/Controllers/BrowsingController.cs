@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using BackendApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class BrowsingController(AppDbContext db) : ControllerBase
+public class BrowsingController(AppDbContext db, INotificationRouter notifications) : ControllerBase
 {
     // SDA-03: whitelist_sites is college-scoped (not per-class) — this is the already-
     // decided design that SDA-04's "approval applies institution-wide" acceptance
@@ -165,6 +166,18 @@ public class BrowsingController(AppDbContext db) : ControllerBase
             site = await db.WhitelistSites.SingleAsync(s => s.CollegeId == requesterCollegeId && s.Url == whitelistRequest.Url);
             await db.SaveChangesAsync();
         }
+
+        // Notification Router (shared) — SDA-04's requester finds out their request was
+        // approved without polling ListPendingRequests. Single, unambiguous recipient
+        // (the original requester), so this is a natural fit for the router unlike some
+        // other notification_type values that would need a "who is Admin" resolution.
+        await notifications.RouteAsync(whitelistRequest.RequestedBy, NotificationType.WhitelistRequest, new
+        {
+            whitelistRequestId = whitelistRequest.Id,
+            url = whitelistRequest.Url,
+            status = whitelistRequest.Status.ToString(),
+            reviewedBy = reviewer.Id,
+        });
 
         return Ok(new ApproveWhitelistRequestResponse(
             whitelistRequest.Id,
