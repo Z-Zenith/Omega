@@ -35,6 +35,9 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return Forbid();
         }
 
+        // #131: only the raw secret (used below for the one-time provisioning URI/response)
+        // ever exists outside the DB. What lands in User.TotpSecret is always the encrypted
+        // form — never the raw Base32 value GenerateSecret() returns.
         var totpSecret = totpService.GenerateSecret();
 
         var user = new User
@@ -44,7 +47,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             AccountType = request.AccountType,
             Identifier = request.Identifier,
             PasswordHash = passwordHasher.Hash(request.InitialPassword),
-            TotpSecret = totpSecret,
+            TotpSecret = totpService.Protect(totpSecret),
             FullName = request.FullName,
             DepartmentId = request.DepartmentId,
             IsActive = true,
