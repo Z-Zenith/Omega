@@ -235,3 +235,40 @@ def test_ais_07_api_validation_error_missing_recorded_at():
     }
     response = client.post("/api/v1/suspicious-behaviour", json=payload)
     assert response.status_code == 422
+
+def test_ais_07_api_explicit_null_min_confidence_uses_documented_default():
+    # Regression test for #89: an explicit `"min_confidence": null` must fall back
+    # to the documented default (0.70) instead of crashing with a 500 from
+    # `score >= None` inside the anomaly engine.
+    events = [
+        {
+            "student_id": "s1",
+            "class_session_id": "sess-1",
+            "assignment_id": None,
+            "event_type": "window_blur",
+            "metadata": {},
+            "recorded_at": (BASE_TIME + timedelta(seconds=i)).isoformat(),
+        }
+        for i in range(4)
+    ]
+    events.append({
+        "student_id": "s1",
+        "class_session_id": "sess-1",
+        "assignment_id": None,
+        "event_type": "paste",
+        "metadata": {"char_count": 500},
+        "recorded_at": (BASE_TIME + timedelta(seconds=5)).isoformat(),
+    })
+
+    response = client.post(
+        "/api/v1/suspicious-behaviour",
+        json={"events": events, "min_confidence": None},
+    )
+    assert response.status_code == 200
+
+    data = response.json()
+    # This event set is the same one used in test_ais_07_api_suspicious_behaviour_success,
+    # which flags at the true default of 0.70 — confirms None resolved to 0.70, not to
+    # some other value that would coincidentally still flag (e.g. 0.0).
+    assert len(data["flags"]) == 1
+    assert data["flags"][0]["student_id"] == "s1"
