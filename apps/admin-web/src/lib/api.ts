@@ -280,4 +280,21 @@ export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
 }
 
+// AWA-04 — fee payment links. Backend: FeesController.CreateLink (already on main),
+// gated by the manage_fees permission (Finance/Admin by default — services/authz/model.fga).
+export interface FeeLinkResponse {
+  feeRecordId: string
+  paymentLink: string
+  amount: number
+  dueDate: string
+  status: string
+}
+
+export function createFeeLink(link: { studentId: string; amount: number; dueDate: string }) {
+  return request<FeeLinkResponse>('/fees/links', {
+    method: 'POST',
+    body: JSON.stringify(link),
+  })
+}
+
 export { ApiError }
