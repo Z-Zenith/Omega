@@ -79,7 +79,7 @@ public class MarksControllerTests
 
     private static MarksController BuildController(AppDbContext db, Guid callerId)
     {
-        var controller = new MarksController(db, new PermissionService(db));
+        var controller = new MarksController(db, new PermissionService(db), new CollegeScopeService(db));
         var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, callerId.ToString())]);
         controller.ControllerContext = new ControllerContext
         {
@@ -202,5 +202,74 @@ public class MarksControllerTests
         Assert.True(dto.Published);
         Assert.Equal(75, dto.Marks);
         Assert.Single(await db.InternalMarks.ToListAsync());
+    }
+
+    private static async Task<(Guid CallerId, Guid StudentId, Guid SubjectId)> SeedExternalMarksFixtureAsync(
+        AppDbContext db, Guid callerCollegeId, Guid studentCollegeId, Guid subjectCollegeId)
+    {
+        var callerId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = subjectCollegeId, Name = "CS" };
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS101", Name = "Intro to CS" };
+
+        db.Departments.Add(department);
+        db.Subjects.Add(subject);
+        db.Users.Add(new User { Id = callerId, CollegeId = callerCollegeId, Identifier = $"caller-{callerId:N}", PasswordHash = "hash", FullName = "Caller", IsActive = true, AccountType = AccountType.Teacher });
+        db.Users.Add(new User { Id = studentId, CollegeId = studentCollegeId, Identifier = $"student-{studentId:N}", PasswordHash = "hash", FullName = "Student", IsActive = true, AccountType = AccountType.Student });
+        db.Permissions.Add(new Permission { Code = "add_external_marks", Description = "x" });
+        db.Roles.Add(new Role { Code = "hod" });
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = callerId, RoleCode = "hod", GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var role = await db.Roles.FindAsync("hod");
+        var permission = await db.Permissions.FindAsync("add_external_marks");
+        role!.PermissionCodes.Add(permission!);
+        await db.SaveChangesAsync();
+
+        return (callerId, studentId, subject.Id);
+    }
+
+    // #129 — add_external_marks has no college/department scoping column at all; this
+    // endpoint must still reject a grant holder submitting marks for a student or subject
+    // outside their own college.
+    [Fact]
+    public async Task CreateExternal_SucceedsWhenStudentAndSubjectAreInCallersCollege()
+    {
+        using var db = NewDb();
+        var college = Guid.NewGuid();
+        var (callerId, studentId, subjectId) = await SeedExternalMarksFixtureAsync(db, college, college, college);
+        var controller = BuildController(db, callerId);
+
+        var result = await controller.CreateExternal(new CreateExternalMarkRequest(studentId, subjectId, "A"));
+
+        Assert.IsType<OkObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task CreateExternal_ForbidsCrossCollegeStudent()
+    {
+        using var db = NewDb();
+        var callerCollege = Guid.NewGuid();
+        var (callerId, studentId, subjectId) = await SeedExternalMarksFixtureAsync(db, callerCollege, Guid.NewGuid(), callerCollege);
+        var controller = BuildController(db, callerId);
+
+        var result = await controller.CreateExternal(new CreateExternalMarkRequest(studentId, subjectId, "A"));
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.ExternalMarks.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateExternal_ForbidsCrossCollegeSubject()
+    {
+        using var db = NewDb();
+        var callerCollege = Guid.NewGuid();
+        var (callerId, studentId, subjectId) = await SeedExternalMarksFixtureAsync(db, callerCollege, callerCollege, Guid.NewGuid());
+        var controller = BuildController(db, callerId);
+
+        var result = await controller.CreateExternal(new CreateExternalMarkRequest(studentId, subjectId, "A"));
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.ExternalMarks.ToListAsync());
     }
 }

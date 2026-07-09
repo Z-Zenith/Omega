@@ -12,29 +12,37 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class RolesController(AppDbContext db, IPermissionService permissions) : ControllerBase
+public class RolesController(AppDbContext db, IPermissionService permissions, ICollegeScopeService collegeScope) : ControllerBase
 {
-    // AWA-13
+    // AWA-13 — #127: scoped to the caller's own college. Without this, any holder of
+    // manage_roles_and_permissions (a college-scoped role in intent, per architecture doc
+    // Section 9) could enumerate every role binding on the platform, across every college.
     [HttpGet("role-bindings")]
     public async Task<ActionResult<List<RoleBindingDto>>> ListRoleBindings()
     {
-        if (!await permissions.HasPermissionAsync(CurrentUserId(), "manage_roles_and_permissions"))
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "manage_roles_and_permissions"))
         {
             return Forbid();
         }
 
+        var callerCollegeId = await collegeScope.GetCollegeIdAsync(userId);
         var bindings = await db.RoleBindings
             .Include(b => b.User)
+            .Where(b => b.User.CollegeId == callerCollegeId)
             .OrderByDescending(b => b.GrantedAt)
             .ToListAsync();
         return Ok(bindings.Select(ToDto).ToList());
     }
 
-    // AWA-13
+    // AWA-13 — #127: the target user must belong to the caller's own college, otherwise a
+    // College-A admin could grant admin/manage_accounts/etc. to a College-B account (full
+    // cross-tenant takeover).
     [HttpPost("role-bindings")]
     public async Task<ActionResult<RoleBindingDto>> CreateRoleBinding(CreateRoleBindingRequest request)
     {
-        if (!await permissions.HasPermissionAsync(CurrentUserId(), "manage_roles_and_permissions"))
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "manage_roles_and_permissions"))
         {
             return Forbid();
         }
@@ -43,6 +51,10 @@ public class RolesController(AppDbContext db, IPermissionService permissions) : 
         if (user is null)
         {
             return NotFound("User not found.");
+        }
+        if (!await collegeScope.IsSameCollegeAsync(userId, user.CollegeId))
+        {
+            return Forbid();
         }
         if (!await db.Roles.AnyAsync(r => r.Code == request.RoleCode))
         {
@@ -73,23 +85,26 @@ public class RolesController(AppDbContext db, IPermissionService permissions) : 
         return Ok(ToDto(binding));
     }
 
-    // AWA-13
+    // AWA-13 — #127
     [HttpGet("permission-grants")]
     public async Task<ActionResult<List<PermissionGrantDto>>> ListPermissionGrants()
     {
-        if (!await permissions.HasPermissionAsync(CurrentUserId(), "manage_roles_and_permissions"))
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "manage_roles_and_permissions"))
         {
             return Forbid();
         }
 
+        var callerCollegeId = await collegeScope.GetCollegeIdAsync(userId);
         var grants = await db.PermissionGrants
             .Include(g => g.User)
+            .Where(g => g.User.CollegeId == callerCollegeId)
             .OrderByDescending(g => g.CreatedAt)
             .ToListAsync();
         return Ok(grants.Select(ToDto).ToList());
     }
 
-    // AWA-13
+    // AWA-13 — #127
     [HttpPost("permission-grants")]
     public async Task<ActionResult<PermissionGrantDto>> CreatePermissionGrant(CreatePermissionGrantRequest request)
     {
@@ -103,6 +118,10 @@ public class RolesController(AppDbContext db, IPermissionService permissions) : 
         if (user is null)
         {
             return NotFound("User not found.");
+        }
+        if (!await collegeScope.IsSameCollegeAsync(currentUserId, user.CollegeId))
+        {
+            return Forbid();
         }
         if (!await db.Permissions.AnyAsync(p => p.Code == request.PermissionCode))
         {
@@ -136,15 +155,22 @@ public class RolesController(AppDbContext db, IPermissionService permissions) : 
     [HttpDelete("permission-grants/{id}")]
     public async Task<IActionResult> DeletePermissionGrant(Guid id)
     {
-        if (!await permissions.HasPermissionAsync(CurrentUserId(), "manage_roles_and_permissions"))
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "manage_roles_and_permissions"))
         {
             return Forbid();
         }
 
-        var grant = await db.PermissionGrants.FindAsync(id);
+        var grant = await db.PermissionGrants.Include(g => g.User).FirstOrDefaultAsync(g => g.Id == id);
         if (grant is null)
         {
             return NotFound();
+        }
+        // #127: without this, any manage_roles_and_permissions holder could revoke another
+        // college's grants by id.
+        if (!await collegeScope.IsSameCollegeAsync(userId, grant.User.CollegeId))
+        {
+            return Forbid();
         }
 
         db.PermissionGrants.Remove(grant);
@@ -172,6 +198,12 @@ public class RolesController(AppDbContext db, IPermissionService permissions) : 
         if (!collegeExists)
         {
             return BadRequest("Unknown college.");
+        }
+        // #126/#127-class check: a manage_departments holder must not be able to create
+        // departments inside another college.
+        if (!await collegeScope.IsSameCollegeAsync(userId, request.CollegeId))
+        {
+            return Forbid();
         }
 
         var department = new Department
@@ -206,6 +238,10 @@ public class RolesController(AppDbContext db, IPermissionService permissions) : 
         if (department is null)
         {
             return NotFound();
+        }
+        if (!await collegeScope.IsSameCollegeAsync(userId, department.CollegeId))
+        {
+            return Forbid();
         }
 
         var candidate = await db.Users.FindAsync(request.UserId);
