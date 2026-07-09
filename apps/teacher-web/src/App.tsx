@@ -4,6 +4,7 @@ import { ActiveSectionProvider, useActiveSection } from '@/lib/activeSection'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { ApproveMarksPage } from '@/pages/ApproveMarksPage'
 import { ReportsPage } from '@/pages/ReportsPage'
 import { ExternalMarksPage } from '@/pages/ExternalMarksPage'
 import { AttendancePage } from '@/pages/AttendancePage'
@@ -63,6 +64,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/reports">Report</Link>
           <Link to="/external-marks">External Marks</Link>
           <Link to="/marks">Marks</Link>
+          <Link to="/approve-marks">Approve Marks</Link>
           <Link to="/messages">Messages</Link>
         </div>
         <div className="flex items-center gap-4">
@@ -152,6 +154,16 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <MarksPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/approve-marks"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <ApproveMarksPage />
                 </Shell>
               </RequireAuth>
             }
