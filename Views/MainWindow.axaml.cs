@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -21,6 +22,8 @@ public partial class MainWindow : Window
 
     private readonly IAppClipboardService _clipboard = AppClipboardService.Instance;
 
+    private UsageTelemetryService? _telemetryService;
+
     // SDA-22: set from App.axaml.cs (same lifetime/wiring as AttachTo for auto-submit).
     // Null before that wiring happens (e.g. design-time), in which case clipboard actions
     // are never blocked — matches "no assignment open" being the safe default.
@@ -32,6 +35,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Deactivated += OnDeactivated;
+        Deactivated += (_, _) => _telemetryService?.Record("window_blur");
+        Activated += (_, _) => _telemetryService?.Record("window_focus");
         Closing += OnClosing;
 
         // SDA-21: intercept every copy/cut/paste from any TextBox in the visual tree (these
@@ -92,12 +97,14 @@ public partial class MainWindow : Window
             _classLockService = shell.ClassLockService;
             _classLockService.LockStateChanged += OnLockStateChanged;
             ApplyLockState(_classLockService.IsLocked);
+            _telemetryService = shell.UsageTelemetryService;
         }
         else
         {
             // Logged out (or not logged in yet): no timetable to check against, so
             // there must be zero restriction.
             ApplyLockState(false);
+            _telemetryService = null;
         }
     }
 
@@ -220,6 +227,8 @@ public partial class MainWindow : Window
             {
                 // Mirrors TextBox.Paste(): insert at the caret / replace the current selection.
                 textBox.SelectedText = text;
+                // SDA-25: paste char_count feeds AIS-07's large-paste-burst heuristic.
+                _telemetryService?.Record("paste", new Dictionary<string, object> { ["char_count"] = text.Length });
             }
 
             // Prevent TextBox.Paste() from also reading from the real OS clipboard.
