@@ -125,6 +125,18 @@ export interface MarkAttendanceResponse {
   records: MarkedAttendanceDto[]
 }
 
+export interface AttendanceAlertDto {
+  studentId: string
+  studentName: string
+  sectionId: string
+  sectionName: string
+  attendancePercentage: number
+}
+
+export function getAttendanceAlerts() {
+  return request<AttendanceAlertDto[]>('/attendance/alerts')
+}
+
 export function markAttendance(
   timetableSlotId: string,
   entries: { studentId: string; status: AttendanceStatus }[],

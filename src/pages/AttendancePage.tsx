@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import {
   getMyTimetable,
   getSectionRoster,
+  getAttendanceAlerts,
   markAttendance,
   ApiError,
   type AttendanceStatus,
@@ -29,6 +30,7 @@ export function AttendancePage() {
   const [message, setMessage] = useState<string | null>(null)
 
   const timetable = useQuery({ queryKey: ['timetable', 'mine'], queryFn: getMyTimetable })
+  const alerts = useQuery({ queryKey: ['attendance', 'alerts'], queryFn: getAttendanceAlerts })
 
   const todaysSlots = useMemo<TimetableSlotDto[]>(() => {
     if (!timetable.data) return []
@@ -85,6 +87,25 @@ export function AttendancePage() {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
+      {alerts.data && alerts.data.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Attendance alerts</CardTitle>
+            <CardDescription>Students who just crossed below 65% attendance (TWA-09).</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col divide-y rounded-md border">
+            {alerts.data.map((alert) => (
+              <div key={`${alert.sectionId}-${alert.studentId}`} className="flex items-center justify-between gap-4 px-4 py-2">
+                <span className="text-sm">
+                  {alert.studentName} — {alert.sectionName}
+                </span>
+                <span className="text-sm font-medium text-destructive">{alert.attendancePercentage}%</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Mark attendance</CardTitle>
