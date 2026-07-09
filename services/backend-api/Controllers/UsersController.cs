@@ -122,7 +122,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
     // [Authorize] to this controller (for AWA-07) doesn't leave this reachable — and
     // able to take over any account — for any authenticated caller regardless of role.
     [HttpPost("{id}/reset-password")]
-    public async Task<IActionResult> ResetPassword(Guid id, [FromBody] string newPassword)
+    public async Task<IActionResult> ResetPassword(Guid id, [FromBody] ResetPasswordRequest request)
     {
         var caller = await CurrentUserAsync();
         if (caller is null)
@@ -140,7 +140,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return NotFound();
         }
 
-        user.PasswordHash = passwordHasher.Hash(newPassword);
+        user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         await db.SaveChangesAsync();
         return NoContent();
     }
