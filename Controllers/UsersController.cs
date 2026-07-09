@@ -12,7 +12,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1/users")]
 [Authorize]
-public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, ITotpService totpService, IPermissionService permissions) : ControllerBase
+public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, ITotpService totpService, IPermissionService permissions, ICollegeScopeService collegeScope) : ControllerBase
 {
     // AWA-09: account creation. Returns the TOTP provisioning URI once, at creation time,
     // since SDA-02/TWA-03 login always requires a TOTP code alongside password.
@@ -31,6 +31,14 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return Unauthorized();
         }
         if (!await permissions.HasPermissionAsync(caller.Id, "manage_accounts"))
+        {
+            return Forbid();
+        }
+        // #129: manage_accounts is a global-scoped permission enforced platform-wide today,
+        // but is meant to be college-scoped (architecture doc Section 9) — without this, an
+        // IT/Admin at one college could create accounts (including admin/it/finance) at any
+        // other college.
+        if (!await collegeScope.IsSameCollegeAsync(caller.Id, request.CollegeId))
         {
             return Forbid();
         }
@@ -138,6 +146,13 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         if (user is null)
         {
             return NotFound();
+        }
+        // #128: reset_password is a global-scoped permission today; without this check any
+        // holder (typically IT) can take over accounts — including other colleges' admins —
+        // by resetting their password. Mirrors GetProfile's existing correct CollegeId check.
+        if (user.CollegeId != caller.CollegeId)
+        {
+            return Forbid();
         }
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
