@@ -10,6 +10,9 @@
   <ItemGroup>
     <Folder Include="Models\" />
     <AvaloniaResource Include="Assets\**" />
+    <Compile Remove="StudentDesktop.Tests\**" />
+    <AvaloniaResource Remove="StudentDesktop.Tests\**" />
+    <None Remove="StudentDesktop.Tests\**" />
   </ItemGroup>
 
   <ItemGroup>
