@@ -52,3 +52,6 @@ public record SectionPerformanceSummaryDto(
     decimal? OverallAttendancePercentage,
     List<StudentAttendanceDto> StudentAttendance,
     List<SubjectMarksSummaryDto> MarksBySubject);
+
+// SDA-12
+public record ExitPingResponse(bool Notified, Guid? ClassSessionId, Guid? NotifiedTeacherId);
