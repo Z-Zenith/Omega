@@ -87,7 +87,7 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 | granted_by | uuid FK → users | AWA-13 |
 | created_at | timestamptz | |
 
-*Note: these tables mirror what's mechanically enforced by OpenFGA (Section 9 of the architecture doc) — the tables are your source of truth for writes, OpenFGA answers the "can this user do X" query at read time. Keep them in sync via the same write path, never write to one without the other. Seed `permissions` and `role_default_permissions` from the architecture doc's Section 9 catalog table directly — don't let the two documents drift.*
+*Note: these tables are the actual, sole enforcement mechanism — `Services/PermissionService.cs` in Backend API queries them directly on every permission check. `services/authz/model.fga` documents the same ReBAC shape conceptually (Section 9), but no OpenFGA client exists in Backend API and the model is never loaded into a running store (see #76) — it is not wired in and does not enforce anything. Seed `permissions` and `role_default_permissions` from the architecture doc's Section 9 catalog table directly, and keep `model.fga` in sync by hand if it's edited, but do not rely on OpenFGA to answer authorization queries.*
 
 **`user_sessions`**
 | Column | Type | Notes |
