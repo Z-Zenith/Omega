@@ -122,6 +122,18 @@ export function createEvent(event: {
   })
 }
 
+export interface TeacherReportDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  sectionId: string | null
+  sectionName: string | null
+  studentId: string | null
+  studentName: string | null
+  content: string
+  submittedAt: string
+}
+
 export interface UserProfileDto {
   id: string
   fullName: string
@@ -233,6 +245,10 @@ export interface TeacherRemarkDto {
   submittedAt: string
 }
 
+export function getReports() {
+  return request<TeacherReportDto[]>('/reports')
+}
+
 export interface BrowsingSummaryReportDto {
   id: string
   summaryText: string
@@ -262,6 +278,23 @@ export interface StudentRecordDto {
 
 export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
+}
+
+// AWA-04 — fee payment links. Backend: FeesController.CreateLink (already on main),
+// gated by the manage_fees permission (Finance/Admin by default — services/authz/model.fga).
+export interface FeeLinkResponse {
+  feeRecordId: string
+  paymentLink: string
+  amount: number
+  dueDate: string
+  status: string
+}
+
+export function createFeeLink(link: { studentId: string; amount: number; dueDate: string }) {
+  return request<FeeLinkResponse>('/fees/links', {
+    method: 'POST',
+    body: JSON.stringify(link),
+  })
 }
 
 export { ApiError }
