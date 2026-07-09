@@ -53,5 +53,8 @@ public record SectionPerformanceSummaryDto(
     List<StudentAttendanceDto> StudentAttendance,
     List<SubjectMarksSummaryDto> MarksBySubject);
 
+// TWA-09
+public record AttendanceAlertDto(Guid StudentId, string StudentName, Guid SectionId, string SectionName, decimal AttendancePercentage);
+
 // SDA-12
 public record ExitPingResponse(bool Notified, Guid? ClassSessionId, Guid? NotifiedTeacherId);

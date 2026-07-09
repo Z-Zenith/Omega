@@ -525,9 +525,83 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         return Ok(new MarkAttendanceResponse(session.Id, session.SessionDate, sectionId, records));
     }
 
-    // TWA-09
+    // TWA-09: below-65% attendance alerts for the teacher's own sections.
+    //
+    // "Fires only the first time crossing below 65%" is implemented without any new
+    // persistence or schema change (the notification_type enum has no matching value for
+    // this, and adding one is a contract change requiring sign-off per CLAUDE.md): a
+    // student is only included here if their MOST RECENT attendance record is the exact
+    // one that dropped their cumulative percentage from >=65% to <65%. Once a later
+    // session is marked, that record becomes the new "most recent" one — if the student
+    // was already below 65% before it, the crossing condition no longer holds and the
+    // alert stops appearing, even though the student remains below 65% overall. This
+    // ties the alert to the marking event that caused the crossing rather than to an
+    // ongoing state, which is what "fires once" requires.
+    private const decimal AttendanceAlertThreshold = 65m;
+
     [HttpGet("attendance/alerts")]
-    public IActionResult AttendanceAlerts() => StatusCode(501, new { feature = "TWA-09", status = "not_implemented" });
+    public async Task<ActionResult<List<AttendanceAlertDto>>> AttendanceAlerts()
+    {
+        var userId = CurrentUserId();
+
+        var sectionIds = await db.TimetableSlots
+            .Where(s => s.TeacherId == userId)
+            .Select(s => s.SectionId)
+            .Distinct()
+            .ToListAsync();
+        if (sectionIds.Count == 0)
+        {
+            return Ok(new List<AttendanceAlertDto>());
+        }
+
+        var sections = await db.Sections
+            .Where(sec => sectionIds.Contains(sec.Id))
+            .ToDictionaryAsync(sec => sec.Id, sec => sec.Name);
+
+        var alerts = new List<AttendanceAlertDto>();
+
+        foreach (var sectionId in sectionIds)
+        {
+            var studentIds = await db.SectionEnrollments
+                .Where(e => e.SectionId == sectionId)
+                .Select(e => e.StudentId)
+                .ToListAsync();
+
+            foreach (var studentId in studentIds)
+            {
+                var records = await db.AttendanceRecords
+                    .Where(r => r.StudentId == studentId && r.ClassSession.TimetableSlot.SectionId == sectionId)
+                    .OrderBy(r => r.ClassSession.SessionDate).ThenBy(r => r.MarkedAt)
+                    .Select(r => r.Status)
+                    .ToListAsync();
+
+                if (records.Count == 0)
+                {
+                    continue;
+                }
+
+                var latest = records[^1];
+                var withoutLatest = records.Take(records.Count - 1).ToList();
+
+                var pctWith = PercentPresent(records);
+                var pctWithout = withoutLatest.Count == 0 ? 100m : PercentPresent(withoutLatest);
+
+                var justCrossed = pctWith < AttendanceAlertThreshold && pctWithout >= AttendanceAlertThreshold;
+                if (!justCrossed)
+                {
+                    continue;
+                }
+
+                var student = await db.Users.FindAsync(studentId);
+                alerts.Add(new AttendanceAlertDto(studentId, student?.FullName ?? "", sectionId, sections.GetValueOrDefault(sectionId, ""), Math.Round(pctWith, 1)));
+            }
+        }
+
+        return Ok(alerts);
+    }
+
+    private static decimal PercentPresent(List<AttendanceStatus> records) =>
+        records.Count == 0 ? 100m : 100m * records.Count(s => s == AttendanceStatus.Present) / records.Count;
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
 
