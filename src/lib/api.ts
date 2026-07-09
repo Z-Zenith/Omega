@@ -258,6 +258,35 @@ export function submitExternalMark(mark: { studentId: string; subjectId: string;
   })
 }
 
+// TWA-20
+export interface PendingExternalMarkDto {
+  id: string
+  studentId: string
+  studentFullName: string
+  subjectId: string
+  subjectName: string
+  grade: string
+  submittedBy: string
+  submittedByFullName: string
+  submittedAt: string
+}
+
+export function getPendingExternalMarks() {
+  return request<PendingExternalMarkDto[]>('/marks/external/pending')
+}
+
+export interface ApproveExternalMarkResponse {
+  id: string
+  approvedBy: string
+  approvedAt: string
+}
+
+export function approveExternalMark(id: string) {
+  return request<ApproveExternalMarkResponse>(`/marks/external/${id}/approve`, {
+    method: 'POST',
+  })
+}
+
 export interface InternalMarksRosterEntry {
   studentId: string
   studentName: string
