@@ -104,6 +104,27 @@ public class ApiClient
         }
     }
 
+    // SDA-12: fired whenever the app loses effective focus or is closing. Whether that
+    // actually matters (i.e. whether the student is in a scheduled class right now) is
+    // decided entirely server-side, so this always fires and is a best-effort, fire-and-
+    // forget style call — a failed ping must never block the student from closing the app
+    // or interrupt whatever they were doing when focus moved elsewhere.
+    public async Task ExitPingAsync()
+    {
+        if (Token is null)
+        {
+            return;
+        }
+        try
+        {
+            await SendAsync(HttpMethod.Post, "/api/v1/class-sessions/exit-ping");
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or TaskCanceledException)
+        {
+            // Best-effort — there is no user-facing feedback for this event either way.
+        }
+    }
+
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body = null)
     {
         var request = new HttpRequestMessage(method, path);
