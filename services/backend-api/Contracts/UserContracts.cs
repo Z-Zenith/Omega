@@ -12,6 +12,8 @@ public record CreateUserRequest(
 
 public record CreateUserResponse(Guid UserId, string TotpProvisioningUri, string TotpSecret);
 
+public record ResetPasswordRequest(string NewPassword);
+
 // AWA-07 — a teacher-submitted remark. TeacherName is resolved via the FK join
 // regardless of whether that teacher is still active (see acceptance criterion:
 // "record includes remarks... even if the submitting teacher is no longer active").

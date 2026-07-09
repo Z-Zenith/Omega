@@ -22,6 +22,10 @@ public record ExternalMarkDto(Guid SubjectId, string SubjectName, string Grade, 
 
 public record MyMarksResponse(List<InternalMarkDto> InternalMarks, List<ExternalMarkDto> ExternalMarks);
 
+// SDA-18. TeacherId/TeacherName are always present — every row comes from a
+// TeacherSectionAssignment, which by definition always names a teacher.
+public record MySubjectDto(Guid SubjectId, string SubjectCode, string SubjectName, Guid TeacherId, string TeacherName);
+
 // SDA-11: request/response shapes for the auto-submit-on-exit endpoint
 // (POST /api/v1/assignments/{id}/submissions/auto-submit). SubmissionFormat mirrors the
 // backend's AssignmentType enum, serialized as a string (see Program.cs JsonStringEnumConverter).
