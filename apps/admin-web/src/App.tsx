@@ -6,10 +6,12 @@ import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
 import { DepartmentsPage } from '@/pages/DepartmentsPage'
+import { ReportsInboxPage } from '@/pages/ReportsInboxPage'
 import { PasswordResetPage } from '@/pages/PasswordResetPage'
 import { RolesPage } from '@/pages/RolesPage'
 import { CreateAccountPage } from '@/pages/CreateAccountPage'
 import { StudentRecordPage } from '@/pages/StudentRecordPage'
+import { FeesPage } from '@/pages/FeesPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -47,10 +49,12 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/timetable">Timetable</Link>
           <Link to="/events">Events</Link>
           <Link to="/departments">Departments</Link>
+          <Link to="/reports">Reports</Link>
           <Link to="/password-reset">Password Reset</Link>
           {canManageRoles && <Link to="/roles">Roles & Permissions</Link>}
           <Link to="/accounts/new">Create account</Link>
           <Link to="/students">Student Records</Link>
+          <Link to="/fees">Fees</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>{fullName}</span>
@@ -100,6 +104,16 @@ function App() {
           }
         />
         <Route
+          path="/reports"
+          element={
+            <RequireAuth>
+              <Shell>
+                <ReportsInboxPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/password-reset"
           element={
             <RequireAuth>
@@ -137,6 +151,16 @@ function App() {
             <RequireAuth>
               <Shell>
                 <StudentRecordPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/fees"
+          element={
+            <RequireAuth>
+              <Shell>
+                <FeesPage />
               </Shell>
             </RequireAuth>
           }
