@@ -103,6 +103,75 @@ public class ApiClient
             ?? throw new ApiException(500, "Empty auto-submit response");
     }
 
+    // SDA-03/SDA-04
+    public async Task<WhitelistResponse> GetWhitelistAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/whitelist");
+        return await response.Content.ReadFromJsonAsync<WhitelistResponse>(JsonOptions)
+            ?? new WhitelistResponse([]);
+    }
+
+    // SDA-08
+    public async Task<List<NoteSummaryDto>> GetMyNotesAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/notes/mine");
+        return await response.Content.ReadFromJsonAsync<List<NoteSummaryDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<NoteDto> GetNoteAsync(Guid noteId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/notes/{noteId}");
+        return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty note response");
+    }
+
+    public async Task<NoteDto> CreateNoteAsync(string title, string contentMarkdown, Guid? id = null, IReadOnlyList<NoteLinkInput>? links = null)
+    {
+        var response = await SendAsync(HttpMethod.Post, "/api/v1/notes", new CreateNoteRequest(title, contentMarkdown, id, links));
+        return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty note response");
+    }
+
+    public async Task<NoteDto> UpdateNoteAsync(Guid noteId, string title, string contentMarkdown, IReadOnlyList<NoteLinkInput>? links = null)
+    {
+        var response = await SendAsync(HttpMethod.Patch, $"/api/v1/notes/{noteId}", new UpdateNoteRequest(title, contentMarkdown, links));
+        return await response.Content.ReadFromJsonAsync<NoteDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty note response");
+    }
+
+    // SDA-19
+    public async Task DeleteNoteAsync(Guid noteId)
+    {
+        await SendAsync(HttpMethod.Delete, $"/api/v1/notes/{noteId}");
+    }
+
+    // SDA-19/SEK-03: onListBacklinks
+    public async Task<List<NoteDto>> GetBacklinksAsync(Guid noteId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/notes/{noteId}/backlinks");
+        return await response.Content.ReadFromJsonAsync<List<NoteDto>>(JsonOptions) ?? [];
+    }
+
+    // SDA-24, DMS-01
+    public async Task<List<DmsThreadSummaryDto>> GetMessageThreadsAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/messages/threads");
+        return await response.Content.ReadFromJsonAsync<List<DmsThreadSummaryDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<List<DmsMessageDto>> GetThreadMessagesAsync(Guid threadId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/messages/threads/{threadId}/messages");
+        return await response.Content.ReadFromJsonAsync<List<DmsMessageDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<DmsMessageDto> SendMessageAsync(Guid threadId, string content)
+    {
+        var response = await SendAsync(HttpMethod.Post, $"/api/v1/messages/threads/{threadId}/messages", new SendMessageRequest(content));
+        return await response.Content.ReadFromJsonAsync<DmsMessageDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty message response");
+    }
+
     // SDA-25: batch of usage-pattern telemetry events, each already tagged by the caller
     // with the active class session and/or assignment it was gathered during.
     public async Task SubmitTelemetryAsync(IReadOnlyList<TelemetryEventRequest> events)
