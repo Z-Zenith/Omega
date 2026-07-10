@@ -122,6 +122,40 @@ export function createEvent(event: {
   })
 }
 
+export interface DepartmentDto {
+  id: string
+  collegeId: string
+  name: string
+  hodRoleBindingId: string | null
+  hodUserId: string | null
+}
+
+export function createDepartment(department: { collegeId: string; name: string }) {
+  return request<DepartmentDto>('/departments', {
+    method: 'POST',
+    body: JSON.stringify(department),
+  })
+}
+
+export function assignHod(departmentId: string, userId: string) {
+  return request<DepartmentDto>(`/departments/${departmentId}/hod`, {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  })
+}
+
+export interface TeacherReportDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  sectionId: string | null
+  sectionName: string | null
+  studentId: string | null
+  studentName: string | null
+  content: string
+  submittedAt: string
+}
+
 export interface UserProfileDto {
   id: string
   fullName: string
@@ -260,6 +294,10 @@ export interface TeacherRemarkDto {
   submittedAt: string
 }
 
+export function getReports() {
+  return request<TeacherReportDto[]>('/reports')
+}
+
 export interface BrowsingSummaryReportDto {
   id: string
   summaryText: string
@@ -274,6 +312,22 @@ export interface SuspiciousFlagReportDto {
   classSessionId: string | null
 }
 
+// AWA-08 — same shapes SDA-15's MyMarksResponse uses, reused here so the Admin view
+// can't drift from what the student sees.
+export interface InternalMarkDto {
+  subjectId: string
+  subjectName: string
+  marks: number
+  publishedAt: string | null
+}
+
+export interface ExternalMarkDto {
+  subjectId: string
+  subjectName: string
+  grade: string
+  approvedAt: string | null
+}
+
 export interface StudentRecordDto {
   id: string
   fullName: string
@@ -285,10 +339,29 @@ export interface StudentRecordDto {
   remarks: TeacherRemarkDto[]
   browsingSummaries: BrowsingSummaryReportDto[]
   suspiciousFlags: SuspiciousFlagReportDto[]
+  internalMarks: InternalMarkDto[]
+  externalMarks: ExternalMarkDto[]
 }
 
 export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
+}
+
+// AWA-04 — fee payment links. Backend: FeesController.CreateLink (already on main),
+// gated by the manage_fees permission (Finance/Admin by default — services/authz/model.fga).
+export interface FeeLinkResponse {
+  feeRecordId: string
+  paymentLink: string
+  amount: number
+  dueDate: string
+  status: string
+}
+
+export function createFeeLink(link: { studentId: string; amount: number; dueDate: string }) {
+  return request<FeeLinkResponse>('/fees/links', {
+    method: 'POST',
+    body: JSON.stringify(link),
+  })
 }
 
 export { ApiError }
