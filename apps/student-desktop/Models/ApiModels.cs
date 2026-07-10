@@ -59,6 +59,17 @@ public record SubmitAssignmentRequest(string ContentUrl, string SubmissionFormat
 
 public record SubmissionDto(Guid Id, Guid AssignmentId, Guid StudentId, string ContentUrl, DateTime SubmittedAt, bool IsLate, bool IsAutosubmitted);
 
+// SDA-16
+public record GroupDto(Guid Id, string Name, string Type, Guid? SectionId);
+
+public record MyGroupsResponse(List<GroupDto> Groups);
+
+public record CreatePostRequest(string Content);
+
+public record GroupPostDto(Guid Id, Guid GroupId, Guid AuthorId, string Content, DateTime CreatedAt);
+
+public record MaterialDto(Guid Id, string Title, string FileUrl, Guid? SubjectId, Guid? GroupId, Guid UploadedBy, DateTime UploadedAt);
+
 // SDA-24, DMS-01: mirrors services/backend-api's MessageResponse/ThreadSummaryResponse
 // field-for-field (see MessagingController.cs) — same shapes DmsBridge forwards to the
 // DMS host bundle over the JS bridge.

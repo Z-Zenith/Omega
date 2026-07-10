@@ -391,6 +391,8 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | POST | `/groups` | TWA-05, AWA-12 |
 | GET | `/groups/mine` | SDA-16 |
 | POST | `/groups/{id}/posts` | SDA-16 |
+| GET | `/groups/{id}/posts` | TWA-05, SDA-16 |
+| GET | `/groups/{id}/materials` | SDA-16 |
 | POST | `/materials` | TWA-06 |
 | GET | `/materials/{id}/download` | API-03 |
 
