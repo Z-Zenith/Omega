@@ -12,6 +12,8 @@ public record CreateUserRequest(
 
 public record CreateUserResponse(Guid UserId, string TotpProvisioningUri, string TotpSecret);
 
+public record ResetPasswordRequest(string NewPassword);
+
 // AWA-07 — a teacher-submitted remark. TeacherName is resolved via the FK join
 // regardless of whether that teacher is still active (see acceptance criterion:
 // "record includes remarks... even if the submitting teacher is no longer active").
@@ -29,6 +31,11 @@ public record SuspiciousFlagReportDto(
     Guid? AssignmentId,
     Guid? ClassSessionId);
 
+// AWA-08: marks sections appended to the AWA-07 DTO. Reusing the same InternalMarkDto /
+// ExternalMarkDto shapes that SDA-15's MyMarksResponse uses (and that PRT-02's
+// WardRecordResponse uses) is the cleanest way to satisfy the "data matches what the
+// student sees in SDA-15, not a separate copy" acceptance criterion — one record shape
+// on the server, one query path, the Admin view and the student view cannot drift.
 public record StudentRecordDto(
     Guid Id,
     string FullName,
@@ -39,4 +46,6 @@ public record StudentRecordDto(
     bool IsActive,
     List<TeacherRemarkDto> Remarks,
     List<BrowsingSummaryReportDto> BrowsingSummaries,
-    List<SuspiciousFlagReportDto> SuspiciousFlags);
+    List<SuspiciousFlagReportDto> SuspiciousFlags,
+    List<InternalMarkDto> InternalMarks,
+    List<ExternalMarkDto> ExternalMarks);

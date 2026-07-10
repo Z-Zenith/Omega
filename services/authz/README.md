@@ -1,5 +1,16 @@
 # Authorization Service (OpenFGA)
 
+> **Status: not currently invoked.** `Backend API` enforces every permission
+> check directly against the `role_bindings`/`roles`/`permission_grants`
+> Postgres tables via `Services/PermissionService.cs` — no OpenFGA client
+> exists anywhere in `services/backend-api` (see #76). `model.fga` below
+> documents the intended ReBAC shape and stays in the repo as a reference for
+> the permission catalog, but it is not loaded into a running store by any
+> code path, and nothing keeps it in sync with `PermissionService.cs` if the
+> latter changes. Treat `PermissionService.cs` + the DB tables as the single
+> source of truth for authorization behavior until/unless this service is
+> actually wired in.
+
 Self-hosted OpenFGA, running via `docker compose up -d authz` (in-memory
 datastore for local dev — the `campus-authz` container in `docker-compose.yml`).
 The model in `model.fga` mirrors the ReBAC design in the architecture doc's

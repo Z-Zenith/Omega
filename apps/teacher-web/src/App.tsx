@@ -1,18 +1,58 @@
 import { Navigate, Route, Routes, Link } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/lib/auth'
-import { ActiveSectionProvider } from '@/lib/activeSection'
+import { ActiveSectionProvider, useActiveSection } from '@/lib/activeSection'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { ApproveMarksPage } from '@/pages/ApproveMarksPage'
+import { ReportsPage } from '@/pages/ReportsPage'
+import { ExternalMarksPage } from '@/pages/ExternalMarksPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
 import { AssignmentsPage } from '@/pages/AssignmentsPage'
+import { MaterialsPage } from '@/pages/MaterialsPage'
+import { CommunityPage } from '@/pages/CommunityPage'
+import { NotesPage } from '@/pages/NotesPage'
+import { DashboardPage } from '@/pages/DashboardPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
   if (!token) return <Navigate to="/login" replace />
   return children
+}
+
+// TWA-02: global section switcher — lets the teacher pick any assigned section, taking
+// precedence over TWA-01's auto-computed one, and reverts on "Auto" so consumers of
+// useActiveSection() (dashboard/attendance/materials) update immediately either way.
+function SectionSwitcher() {
+  const { sectionId, sectionName, isManualOverride, assignedSections, selectSection, clearManualSelection } =
+    useActiveSection()
+
+  if (assignedSections.length === 0) return null
+
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <label className="text-muted-foreground">Section:</label>
+      <select
+        className="rounded-md border px-2 py-1 text-sm"
+        value={sectionId ?? ''}
+        onChange={(e) => (e.target.value ? selectSection(e.target.value) : clearManualSelection())}
+      >
+        <option value="">— none —</option>
+        {assignedSections.map((section) => (
+          <option key={section.sectionId} value={section.sectionId}>
+            {section.sectionName}
+          </option>
+        ))}
+      </select>
+      {isManualOverride && (
+        <button onClick={clearManualSelection} className="underline">
+          Auto ({sectionName ? 'switch back' : 'clear'})
+        </button>
+      )}
+    </div>
+  )
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -21,18 +61,28 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-svh">
       <nav className="flex items-center justify-between border-b px-8 py-4">
         <div className="flex gap-6 text-sm font-medium">
+          <Link to="/dashboard">Dashboard</Link>
           <Link to="/timetable">Timetable</Link>
           <Link to="/attendance">Attendance</Link>
           <Link to="/events">Events</Link>
+          <Link to="/reports">Report</Link>
+          <Link to="/external-marks">External Marks</Link>
           <Link to="/marks">Marks</Link>
+          <Link to="/approve-marks">Approve Marks</Link>
           <Link to="/messages">Messages</Link>
           <Link to="/assignments">Assignments</Link>
+          <Link to="/materials">Materials</Link>
+          <Link to="/community">Community</Link>
+          <Link to="/notes">Notes</Link>
         </div>
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-          <span>{fullName}</span>
-          <button onClick={() => setSession(null)} className="underline">
-            Sign out
-          </button>
+        <div className="flex items-center gap-4">
+          <SectionSwitcher />
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>{fullName}</span>
+            <button onClick={() => setSession(null)} className="underline">
+              Sign out
+            </button>
+          </div>
         </div>
       </nav>
       {children}
@@ -46,6 +96,16 @@ function App() {
       <ActiveSectionProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <DashboardPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
           <Route
             path="/timetable"
             element={
@@ -77,11 +137,41 @@ function App() {
             }
           />
           <Route
+            path="/reports"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <ReportsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/external-marks"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <ExternalMarksPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/marks"
             element={
               <RequireAuth>
                 <Shell>
                   <MarksPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/approve-marks"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <ApproveMarksPage />
                 </Shell>
               </RequireAuth>
             }
@@ -102,6 +192,36 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <AssignmentsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/materials"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <MaterialsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/community"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <CommunityPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/notes"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <NotesPage />
                 </Shell>
               </RequireAuth>
             }
