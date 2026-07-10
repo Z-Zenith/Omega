@@ -7,6 +7,10 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly ApiClient _apiClient = new();
 
+    // SDA-12: exposed so the window's code-behind can fire an exit-ping on focus-loss/close
+    // without the view needing its own copy of session/auth state.
+    public ApiClient ApiClient => _apiClient;
+
     // SDA-11: shared across the app's lifetime so it survives sign-out/sign-in and can
     // be attached once to the main window in App.axaml.cs. No assignment-editing view
     // calls BeginSession on it yet — see AssignmentAutoSubmitService for details.
@@ -23,6 +27,6 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private LoginViewModel CreateLoginPage() => new(_apiClient, response =>
     {
-        CurrentPage = new ShellViewModel(_apiClient, response.FullName, () => CurrentPage = CreateLoginPage());
+        CurrentPage = new ShellViewModel(_apiClient, response.FullName, () => CurrentPage = CreateLoginPage(), AutoSubmitService);
     });
 }

@@ -125,6 +125,18 @@ export interface MarkAttendanceResponse {
   records: MarkedAttendanceDto[]
 }
 
+export interface AttendanceAlertDto {
+  studentId: string
+  studentName: string
+  sectionId: string
+  sectionName: string
+  attendancePercentage: number
+}
+
+export function getAttendanceAlerts() {
+  return request<AttendanceAlertDto[]>('/attendance/alerts')
+}
+
 export function markAttendance(
   timetableSlotId: string,
   entries: { studentId: string; status: AttendanceStatus }[],
@@ -198,6 +210,29 @@ export function createEvent(event: {
   })
 }
 
+export interface TeacherReportDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  sectionId: string | null
+  sectionName: string | null
+  studentId: string | null
+  studentName: string | null
+  content: string
+  submittedAt: string
+}
+
+export function createReport(report: { sectionId?: string | null; studentId?: string | null; content: string }) {
+  return request<TeacherReportDto>('/reports', {
+    method: 'POST',
+    body: JSON.stringify({
+      sectionId: report.sectionId ?? null,
+      studentId: report.studentId ?? null,
+      content: report.content,
+    }),
+  })
+}
+
 export interface ExternalMarksPermissionStatus {
   granted: boolean
   expiresAt: string | null
@@ -220,6 +255,35 @@ export function submitExternalMark(mark: { studentId: string; subjectId: string;
   return request<ExternalMarkSubmission>('/marks/external', {
     method: 'POST',
     body: JSON.stringify(mark),
+  })
+}
+
+// TWA-20
+export interface PendingExternalMarkDto {
+  id: string
+  studentId: string
+  studentFullName: string
+  subjectId: string
+  subjectName: string
+  grade: string
+  submittedBy: string
+  submittedByFullName: string
+  submittedAt: string
+}
+
+export function getPendingExternalMarks() {
+  return request<PendingExternalMarkDto[]>('/marks/external/pending')
+}
+
+export interface ApproveExternalMarkResponse {
+  id: string
+  approvedBy: string
+  approvedAt: string
+}
+
+export function approveExternalMark(id: string) {
+  return request<ApproveExternalMarkResponse>(`/marks/external/${id}/approve`, {
+    method: 'POST',
   })
 }
 

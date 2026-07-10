@@ -86,6 +86,13 @@ public class ApiClient
             ?? throw new ApiException(500, "Empty feedback response");
     }
 
+    // SDA-18
+    public async Task<List<MySubjectDto>> GetMySubjectsAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/subjects/mine");
+        return await response.Content.ReadFromJsonAsync<List<MySubjectDto>>(JsonOptions) ?? [];
+    }
+
     // SDA-11: called by AssignmentAutoSubmitService when the app detects exit or
     // focus-loss during an active assignment window.
     public async Task<SubmissionDto> AutoSubmitAssignmentAsync(Guid assignmentId, string contentUrl, string submissionFormat)
@@ -94,6 +101,17 @@ public class ApiClient
             new SubmitAssignmentRequest(contentUrl, submissionFormat));
         return await response.Content.ReadFromJsonAsync<SubmissionDto>(JsonOptions)
             ?? throw new ApiException(500, "Empty auto-submit response");
+    }
+
+    // SDA-25: batch of usage-pattern telemetry events, each already tagged by the caller
+    // with the active class session and/or assignment it was gathered during.
+    public async Task SubmitTelemetryAsync(IReadOnlyList<TelemetryEventRequest> events)
+    {
+        if (events.Count == 0)
+        {
+            return;
+        }
+        await SendAsync(HttpMethod.Post, "/api/v1/telemetry/usage", new SubmitTelemetryRequest(events));
     }
 
     public async Task LogoutAsync()
@@ -109,6 +127,27 @@ public class ApiClient
         finally
         {
             Token = null;
+        }
+    }
+
+    // SDA-12: fired whenever the app loses effective focus or is closing. Whether that
+    // actually matters (i.e. whether the student is in a scheduled class right now) is
+    // decided entirely server-side, so this always fires and is a best-effort, fire-and-
+    // forget style call — a failed ping must never block the student from closing the app
+    // or interrupt whatever they were doing when focus moved elsewhere.
+    public async Task ExitPingAsync()
+    {
+        if (Token is null)
+        {
+            return;
+        }
+        try
+        {
+            await SendAsync(HttpMethod.Post, "/api/v1/class-sessions/exit-ping");
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException or TaskCanceledException)
+        {
+            // Best-effort — there is no user-facing feedback for this event either way.
         }
     }
 

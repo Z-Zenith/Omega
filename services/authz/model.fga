@@ -1,6 +1,13 @@
 model
   schema 1.1
 
+# STATUS: not currently invoked by Backend API. No OpenFGA client exists in
+# services/backend-api — every permission check is enforced directly against
+# the role_bindings/roles/permission_grants Postgres tables by
+# Services/PermissionService.cs. This file documents the intended ReBAC shape
+# (see services/authz/README.md) but is not a live source of authorization
+# truth; treat PermissionService.cs as authoritative. See #76.
+#
 # Mirrors architecture doc Section 9's ReBAC design: College is the tenant
 # boundary, RoleBinding is either global (within the College) or scoped to a
 # Department, and PermissionGrant is an additive/time-bound override on top

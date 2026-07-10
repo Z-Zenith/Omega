@@ -31,9 +31,20 @@ public record SubmitTeacherFeedbackRequest(Guid TeacherId, int Rating, string? C
 
 public record TeacherFeedbackDto(Guid Id, Guid TeacherId, int Rating, string? Comments, DateTime SubmittedAt);
 
+// SDA-18. TeacherId/TeacherName are always present — every row comes from a
+// TeacherSectionAssignment, which by definition always names a teacher.
+public record MySubjectDto(Guid SubjectId, string SubjectCode, string SubjectName, Guid TeacherId, string TeacherName);
+
 // SDA-11: request/response shapes for the auto-submit-on-exit endpoint
 // (POST /api/v1/assignments/{id}/submissions/auto-submit). SubmissionFormat mirrors the
 // backend's AssignmentType enum, serialized as a string (see Program.cs JsonStringEnumConverter).
 public record SubmitAssignmentRequest(string ContentUrl, string SubmissionFormat);
 
 public record SubmissionDto(Guid Id, Guid AssignmentId, Guid StudentId, string ContentUrl, DateTime SubmittedAt, bool IsLate, bool IsAutosubmitted);
+
+// SDA-25: no ClassSessionId here — the client only ever claims an AssignmentId it
+// already knows (from having opened that assignment); the backend resolves the active
+// class session itself when AssignmentId is omitted (see TelemetryController).
+public record TelemetryEventRequest(string EventType, Dictionary<string, object>? Metadata, Guid? AssignmentId, DateTime RecordedAt);
+
+public record SubmitTelemetryRequest(IReadOnlyList<TelemetryEventRequest> Events);
