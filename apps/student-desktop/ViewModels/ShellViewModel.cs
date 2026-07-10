@@ -19,6 +19,7 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
     public EventsViewModel EventsViewModel { get; }
     public ChangePasswordViewModel ChangePasswordViewModel { get; }
     public MarksViewModel MarksViewModel { get; }
+    public TeacherFeedbackViewModel TeacherFeedbackViewModel { get; }
     public CourseInfoViewModel CourseInfoViewModel { get; }
 
     // SDA-01: owned for the lifetime of the signed-in session. Started here so the
@@ -43,6 +44,7 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
         EventsViewModel = new EventsViewModel(apiClient);
         ChangePasswordViewModel = new ChangePasswordViewModel(apiClient);
         MarksViewModel = new MarksViewModel(apiClient);
+        TeacherFeedbackViewModel = new TeacherFeedbackViewModel(apiClient);
         CourseInfoViewModel = new CourseInfoViewModel(apiClient);
         _currentPage = CalendarViewModel;
 
@@ -64,6 +66,9 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
 
     [RelayCommand]
     private void ShowMarks() => CurrentPage = MarksViewModel;
+
+    [RelayCommand]
+    private void ShowTeacherFeedback() => CurrentPage = TeacherFeedbackViewModel;
 
     [RelayCommand]
     private void ShowCourseInfo() => CurrentPage = CourseInfoViewModel;

@@ -384,6 +384,12 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | POST | `/materials` | TWA-06 |
 | GET | `/materials/{id}/download` | API-03 |
 
+### Teacher Feedback
+| Method | Path | Feature |
+|---|---|---|
+| GET | `/teacher-feedback/my-teachers` | SDA-17 |
+| POST | `/teacher-feedback` | SDA-17 |
+
 ### Calendar & Events
 | Method | Path | Feature |
 |---|---|---|
