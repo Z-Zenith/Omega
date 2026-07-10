@@ -195,7 +195,7 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 **`plagiarism_reports`** (AIS-02, Copyleaks) — `id`, `submission_id` FK, `similarity_score`, `copyleaks_scan_id` text, `matched_sources` jsonb, `checked_at`
 **`copy_check_flags`** (AIS-03) — `id`, `submission_a_id` FK, `submission_b_id` FK, `similarity_score` (flagged at ≥ 90%), `flagged_at`
 **`ai_detection_reports`** (AIS-05, Pangram) — `id`, `submission_id` FK, `ai_likelihood_score`, `pangram_report_id` text, `checked_at`
-**`autograde_suggestions`** (AIS-04) — `id`, `submission_id` FK, `suggested_grade`, `confirmed_by_teacher` boolean, `confirmed_at` nullable
+**`autograde_suggestions`** (AIS-04) — `id`, `submission_id` FK, `suggested_grade`, `confidence` numeric nullable, `matched_criteria` jsonb nullable, `feedback` jsonb nullable, `confirmed_by_teacher` boolean, `confirmed_at` nullable
 
 ### 1.5 Marks
 
