@@ -65,6 +65,23 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         return Ok(ToDto(group));
     }
 
+    // AWA-06: "no group is excluded from Admin's view regardless of who created it" —
+    // institution-wide, not scoped to the caller's own college the way most other
+    // reads are (Lecturer/HoD/Admin all hold view_all_groups; in practice only Admin's
+    // "institution" is meaningfully broader than a teacher's own membership list).
+    [HttpGet("groups")]
+    public async Task<ActionResult<MyGroupsResponse>> AllGroups()
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "view_all_groups"))
+        {
+            return Forbid();
+        }
+
+        var groups = await db.Groups.ToListAsync();
+        return Ok(new MyGroupsResponse(groups.Select(ToDto).ToList()));
+    }
+
     // SDA-16
     [HttpGet("groups/mine")]
     public async Task<ActionResult<MyGroupsResponse>> MyGroups()
