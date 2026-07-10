@@ -1,0 +1,43 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:models="using:StudentDesktop.Models"
+             xmlns:avconv="using:Avalonia.Data.Converters"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.CourseInfoView"
+             x:DataType="vm:CourseInfoViewModel">
+
+    <ScrollViewer>
+        <StackPanel Margin="20" Spacing="16">
+            <TextBlock Text="Course &amp; Teacher Info" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="Course and assigned teacher for each subject you're enrolled in (SDA-18)."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed" IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+
+            <ItemsControl ItemsSource="{Binding Subjects}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="models:MySubjectDto">
+                        <Border Background="#F7F7F7" CornerRadius="6" Padding="12" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock FontWeight="Bold">
+                                    <Run Text="{Binding SubjectCode}"/>
+                                    <Run Text=" — "/>
+                                    <Run Text="{Binding SubjectName}"/>
+                                </TextBlock>
+                                <TextBlock Foreground="Gray" Margin="0,4,0,0">
+                                    <Run Text="Teacher: "/>
+                                    <Run Text="{Binding TeacherName}"/>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="No enrolled subjects found yet." Foreground="Gray"
+                       IsVisible="{Binding !Subjects.Count}"/>
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>

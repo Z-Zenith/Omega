@@ -4,10 +4,16 @@ import { ActiveSectionProvider, useActiveSection } from '@/lib/activeSection'
 import { LoginPage } from '@/pages/LoginPage'
 import { TimetablePage } from '@/pages/TimetablePage'
 import { EventsPage } from '@/pages/EventsPage'
+import { ApproveMarksPage } from '@/pages/ApproveMarksPage'
+import { ReportsPage } from '@/pages/ReportsPage'
 import { ExternalMarksPage } from '@/pages/ExternalMarksPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
+import { AssignmentsPage } from '@/pages/AssignmentsPage'
+import { MaterialsPage } from '@/pages/MaterialsPage'
+import { CommunityPage } from '@/pages/CommunityPage'
+import { NotesPage } from '@/pages/NotesPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -59,9 +65,15 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/timetable">Timetable</Link>
           <Link to="/attendance">Attendance</Link>
           <Link to="/events">Events</Link>
+          <Link to="/reports">Report</Link>
           <Link to="/external-marks">External Marks</Link>
           <Link to="/marks">Marks</Link>
+          <Link to="/approve-marks">Approve Marks</Link>
           <Link to="/messages">Messages</Link>
+          <Link to="/assignments">Assignments</Link>
+          <Link to="/materials">Materials</Link>
+          <Link to="/community">Community</Link>
+          <Link to="/notes">Notes</Link>
         </div>
         <div className="flex items-center gap-4">
           <SectionSwitcher />
@@ -125,6 +137,16 @@ function App() {
             }
           />
           <Route
+            path="/reports"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <ReportsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/external-marks"
             element={
               <RequireAuth>
@@ -145,11 +167,61 @@ function App() {
             }
           />
           <Route
+            path="/approve-marks"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <ApproveMarksPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/messages"
             element={
               <RequireAuth>
                 <Shell>
                   <MessagesPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/assignments"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <AssignmentsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/materials"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <MaterialsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/community"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <CommunityPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/notes"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <NotesPage />
                 </Shell>
               </RequireAuth>
             }

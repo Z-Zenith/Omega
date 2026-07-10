@@ -134,6 +134,48 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         return Ok(new GroupPostDto(post.Id, post.GroupId, post.AuthorId, post.Content, post.CreatedAt));
     }
 
+    // TWA-05, SDA-16: "view and post in groups they belong to" requires a way to actually
+    // list what's been posted — CreatePost alone can't satisfy that acceptance criterion.
+    [HttpGet("groups/{id}/posts")]
+    public async Task<ActionResult<List<GroupPostDto>>> ListPosts(Guid id)
+    {
+        var userId = CurrentUserId();
+        var isMember = await db.GroupMembers.AnyAsync(m => m.GroupId == id && m.UserId == userId);
+        if (!isMember)
+        {
+            return Forbid();
+        }
+
+        var posts = await db.GroupPosts
+            .Where(p => p.GroupId == id)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new GroupPostDto(p.Id, p.GroupId, p.AuthorId, p.Content, p.CreatedAt))
+            .ToListAsync();
+
+        return Ok(posts);
+    }
+
+    // SDA-16: "shall surface any material shared in a group inside that group's Materials
+    // section... without a separate upload step" — this is that surface, reading straight
+    // off the same Material rows TWA-06's upload endpoint writes (GroupId set).
+    [HttpGet("groups/{id}/materials")]
+    public async Task<ActionResult<List<MaterialDto>>> ListGroupMaterials(Guid id)
+    {
+        var userId = CurrentUserId();
+        var isMember = await db.GroupMembers.AnyAsync(m => m.GroupId == id && m.UserId == userId);
+        if (!isMember)
+        {
+            return Forbid();
+        }
+
+        var materials = await db.Materials
+            .Where(m => m.GroupId == id)
+            .OrderByDescending(m => m.UploadedAt)
+            .ToListAsync();
+
+        return Ok(materials.Select(ToDto).ToList());
+    }
+
     // TWA-06. Gated by AccountType rather than a permission code — no "upload_material"
     // code exists in the seeded catalog, and adding one is an OpenFGA/permission-catalog
     // contract change that needs separate sign-off (CLAUDE.md contract-change rule).
