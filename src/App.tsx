@@ -10,6 +10,7 @@ import { ExternalMarksPage } from '@/pages/ExternalMarksPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
+import { NotesPage } from '@/pages/NotesPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -66,6 +67,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/marks">Marks</Link>
           <Link to="/approve-marks">Approve Marks</Link>
           <Link to="/messages">Messages</Link>
+          <Link to="/notes">Notes</Link>
         </div>
         <div className="flex items-center gap-4">
           <SectionSwitcher />
@@ -174,6 +176,16 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <MessagesPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/notes"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <NotesPage />
                 </Shell>
               </RequireAuth>
             }
