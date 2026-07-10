@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace BackendApi.Tests;
+namespace BackendApi.Tests.Controllers;
 
 public class SubjectsControllerTests
 {
