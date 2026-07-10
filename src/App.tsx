@@ -10,6 +10,7 @@ import { ExternalMarksPage } from '@/pages/ExternalMarksPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
+import { AssignmentsPage } from '@/pages/AssignmentsPage'
 import { MaterialsPage } from '@/pages/MaterialsPage'
 import { CommunityPage } from '@/pages/CommunityPage'
 import { NotesPage } from '@/pages/NotesPage'
@@ -69,6 +70,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/marks">Marks</Link>
           <Link to="/approve-marks">Approve Marks</Link>
           <Link to="/messages">Messages</Link>
+          <Link to="/assignments">Assignments</Link>
           <Link to="/materials">Materials</Link>
           <Link to="/community">Community</Link>
           <Link to="/notes">Notes</Link>
@@ -180,6 +182,16 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <MessagesPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/assignments"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <AssignmentsPage />
                 </Shell>
               </RequireAuth>
             }

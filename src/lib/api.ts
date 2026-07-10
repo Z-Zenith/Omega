@@ -332,6 +332,36 @@ export function submitInternalMark(mark: {
   })
 }
 
+// TWA-07 — assignment creation. Backend: AssignmentsController.Create (already on main).
+export type AssignmentType = 'Code' | 'Quiz' | 'Essay' | 'FileUpload'
+
+export interface AssignmentDto {
+  id: string
+  subjectId: string
+  title: string
+  description: string | null
+  type: string
+  dueDate: string
+  submissionWindowStart: string
+  submissionWindowEnd: string
+  typeSpecificSettings: string | null
+}
+
+export function createAssignment(assignment: {
+  subjectId: string
+  title: string
+  description: string | null
+  type: AssignmentType
+  dueDate: string
+  submissionWindowStart: string
+  submissionWindowEnd: string
+}) {
+  return request<AssignmentDto>('/assignments', {
+    method: 'POST',
+    body: JSON.stringify(assignment),
+  })
+}
+
 // TWA-06 — material upload. Backend: CommunityController.UploadMaterial (already on main).
 export interface MaterialDto {
   id: string
