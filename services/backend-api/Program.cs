@@ -58,6 +58,15 @@ builder.Services.AddHttpClient<ICopyleaksClient, CopyleaksClient>(client =>
     client.BaseAddress = new Uri(baseUrl);
 });
 
+// AIS-05: Pangram — external, credentialed (Pangram:ApiKey). Same fail-closed reasoning
+// as Copyleaks above: no safe "local dev" base-URL default exists, an empty ApiKey
+// already fails closed inside PangramClient via ExternalServiceNotConfiguredException.
+builder.Services.AddHttpClient<IPangramClient, PangramClient>(client =>
+{
+    var baseUrl = builder.Configuration["Pangram:BaseUrl"] ?? "https://text.api.pangram.com";
+    client.BaseAddress = new Uri(baseUrl);
+});
+
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

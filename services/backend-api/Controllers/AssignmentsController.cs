@@ -15,7 +15,8 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices, ICopyleaksClient copyleaks, IConfiguration configuration) : ControllerBase
+public class AssignmentsController(
+    AppDbContext db, IAiServicesClient aiServices, ICopyleaksClient copyleaks, IPangramClient pangram, IConfiguration configuration) : ControllerBase
 {
     // TWA-07. Gated by "caller teaches this subject" rather than a permission code — no
     // "create_assignment" code exists in the seeded catalog, and adding one is an
@@ -288,8 +289,68 @@ public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices
         return Ok(ToPlagiarismDto(report));
     }
 
-    [HttpGet("submissions/{id}/ai-detection")]
-    public IActionResult AiDetection(Guid id) => StatusCode(501, new { feature = "AIS-05", status = "not_implemented" });
+    // AIS-05: synchronous, unlike AIS-02's Copyleaks — Pangram's public API returns a
+    // likelihood score in the same request, no webhook needed. Changed from the original
+    // stub's GET to a POST: this triggers a fresh analysis and persists an
+    // ai_detection_reports row, it doesn't just fetch a cached resource (same reasoning
+    // as AIS-03/04's verb changes). Re-checking replaces any previous report for this
+    // submission, matching AIS-03's re-check idempotency.
+    //
+    // Never shown to the submitting student (AIS-05 acceptance criterion) — enforced by
+    // the same teacher-or-Admin gate as AIS-02/03/04. The architecture doc also requires
+    // the UI to present this score "as one signal alongside submission history, never as
+    // a standalone misconduct verdict" (false-positive bias against non-native English
+    // writers is documented and real) — that's a Teacher Web App rendering concern, out
+    // of scope for this backend-only PR, same precedent as AIS-01/03/04/07.
+    [HttpPost("submissions/{id}/ai-detection")]
+    public async Task<IActionResult> AiDetection(Guid id)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+
+        var submission = await db.Submissions.Include(s => s.Assignment).FirstOrDefaultAsync(s => s.Id == id);
+        if (submission is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && submission.Assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        AiContentDetectionResult result;
+        try
+        {
+            result = await pangram.DetectAsync(submission.ContentUrl);
+        }
+        catch (ExternalServiceNotConfiguredException)
+        {
+            return StatusCode(503, new
+            {
+                error = "service_not_configured",
+                message = "AI-generated content detection is not configured for this deployment (missing Pangram credentials).",
+            });
+        }
+
+        var existing = await db.AiDetectionReports.Where(r => r.SubmissionId == id).ToListAsync();
+        db.AiDetectionReports.RemoveRange(existing);
+
+        var report = new AiDetectionReport
+        {
+            Id = Guid.NewGuid(),
+            SubmissionId = id,
+            AiLikelihoodScore = (decimal)result.AiLikelihoodScore,
+            PangramReportId = result.PredictionId,
+            CheckedAt = DateTime.UtcNow,
+        };
+        db.AiDetectionReports.Add(report);
+        await db.SaveChangesAsync();
+
+        return Ok(ToAiDetectionDto(report));
+    }
 
     // AIS-03: compares this assignment's submissions against each other via the
     // self-hosted embedding-similarity model, flagging matches at >=90% (per
@@ -453,6 +514,9 @@ public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices
         r.Id, r.SubmissionId, r.SimilarityScore, r.CopyleaksScanId,
         string.IsNullOrEmpty(r.MatchedSources) ? [] : JsonSerializer.Deserialize<List<string>>(r.MatchedSources) ?? [],
         r.CheckedAt);
+
+    private static AiDetectionReportDto ToAiDetectionDto(AiDetectionReport r) => new(
+        r.Id, r.SubmissionId, r.AiLikelihoodScore, r.PangramReportId, r.CheckedAt);
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
 

@@ -73,3 +73,12 @@ public record PlagiarismReportDto(
     string? CopyleaksScanId,
     IReadOnlyList<string> MatchedSources,
     DateTime CheckedAt);
+
+// AIS-05: AI-generated content detection via Pangram. Synchronous (unlike AIS-02's
+// Copyleaks), so a single endpoint both triggers the check and returns the result.
+public record AiDetectionReportDto(
+    Guid Id,
+    Guid SubmissionId,
+    decimal AiLikelihoodScore,
+    string? PangramReportId,
+    DateTime CheckedAt);
