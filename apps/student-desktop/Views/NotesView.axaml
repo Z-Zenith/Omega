@@ -1,0 +1,39 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:models="using:StudentDesktop.Models"
+             xmlns:webview="using:Avalonia.Controls"
+             xmlns:avconv="using:Avalonia.Data.Converters"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.NotesView"
+             x:DataType="vm:NotesViewModel">
+
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="16,12" Spacing="8">
+            <TextBlock Text="Notes" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="SDA-19: powered by the Shared Editor Kit's note editor (SEK-03)."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed" TextWrapping="Wrap"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+        </StackPanel>
+
+        <Border DockPanel.Dock="Left" Width="240" BorderBrush="#DDDDDD" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <Button DockPanel.Dock="Top" Content="New note" Command="{Binding NewNoteCommand}"
+                        Margin="8" HorizontalAlignment="Stretch"/>
+                <ListBox ItemsSource="{Binding Notes}" SelectedItem="{Binding SelectedNote}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="models:NoteSummaryDto">
+                            <TextBlock Text="{Binding Title}" TextWrapping="Wrap"/>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <webview:NativeWebView x:Name="EditorWebView"/>
+    </DockPanel>
+
+</UserControl>

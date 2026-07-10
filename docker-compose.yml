@@ -48,8 +48,16 @@ services:
     restart: unless-stopped
     environment:
       ConnectionStrings__Campus: "Host=postgres;Port=5432;Database=campus;Username=campus;Password=campus_dev"
+      # Required in non-Development environments — backend-api fails fast at startup if unset.
+      # Set JWT_SIGNING_KEY in the shell/.env before `docker compose up`; never commit a real value.
+      Jwt__Key: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY before starting backend-api}
     ports:
       - "8080:8080"
+    volumes:
+      # #131: Data Protection key ring (encrypts TOTP secrets at rest). Must persist across
+      # restarts/redeploys — without this, every existing user's TotpSecret would become
+      # undecryptable (and thus unusable for login) the moment the container is recreated.
+      - campus-backend-keys:/keys
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,3 +131,4 @@ services:
 volumes:
   campus-pg-data:
   campus-judge0-db-data:
+  campus-backend-keys:

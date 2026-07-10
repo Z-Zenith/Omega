@@ -122,6 +122,61 @@ export function createEvent(event: {
   })
 }
 
+export interface DepartmentDto {
+  id: string
+  collegeId: string
+  name: string
+  hodRoleBindingId: string | null
+  hodUserId: string | null
+}
+
+export function createDepartment(department: { collegeId: string; name: string }) {
+  return request<DepartmentDto>('/departments', {
+    method: 'POST',
+    body: JSON.stringify(department),
+  })
+}
+
+export function assignHod(departmentId: string, userId: string) {
+  return request<DepartmentDto>(`/departments/${departmentId}/hod`, {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  })
+}
+
+export interface TeacherReportDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  sectionId: string | null
+  sectionName: string | null
+  studentId: string | null
+  studentName: string | null
+  content: string
+  submittedAt: string
+}
+
+export interface UserProfileDto {
+  id: string
+  fullName: string
+  identifier: string
+  accountType: string
+  collegeId: string
+  departmentId: string | null
+  isActive: boolean
+}
+
+export function getUserProfile(id: string) {
+  return request<UserProfileDto>(`/users/${id}/profile`)
+}
+
+export function resetUserPassword(id: string, newPassword: string) {
+  return request<void>(`/users/${id}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify(newPassword),
+  })
+}
+
 export interface RoleBindingDto {
   id: string
   userId: string
@@ -203,6 +258,33 @@ export function createUser(user: CreateUserRequest) {
   })
 }
 
+// AWA-12 — Admin can create community groups directly (in addition to viewing all
+// existing groups, AWA-06). Same POST /groups endpoint TWA-05 uses, gated by the
+// `create_group` permission (Lecturer/HoD/Admin by default — see services/authz/model.fga
+// and db/init/02_seed_roles_and_permissions.sql), so a group created here is
+// indistinguishable in structure from one a teacher creates.
+export type GroupType = 'SubjectSection' | 'Club' | 'TeacherOnly'
+
+export interface CreateGroupRequest {
+  name: string
+  type: GroupType
+  sectionId: string | null
+}
+
+export interface GroupDto {
+  id: string
+  name: string
+  type: string
+  sectionId: string | null
+}
+
+export function createGroup(group: CreateGroupRequest) {
+  return request<GroupDto>('/groups', {
+    method: 'POST',
+    body: JSON.stringify(group),
+  })
+}
+
 // AWA-07
 export interface TeacherRemarkDto {
   id: string
@@ -210,6 +292,10 @@ export interface TeacherRemarkDto {
   teacherName: string
   content: string
   submittedAt: string
+}
+
+export function getReports() {
+  return request<TeacherReportDto[]>('/reports')
 }
 
 export interface BrowsingSummaryReportDto {
@@ -226,6 +312,22 @@ export interface SuspiciousFlagReportDto {
   classSessionId: string | null
 }
 
+// AWA-08 — same shapes SDA-15's MyMarksResponse uses, reused here so the Admin view
+// can't drift from what the student sees.
+export interface InternalMarkDto {
+  subjectId: string
+  subjectName: string
+  marks: number
+  publishedAt: string | null
+}
+
+export interface ExternalMarkDto {
+  subjectId: string
+  subjectName: string
+  grade: string
+  approvedAt: string | null
+}
+
 export interface StudentRecordDto {
   id: string
   fullName: string
@@ -237,10 +339,29 @@ export interface StudentRecordDto {
   remarks: TeacherRemarkDto[]
   browsingSummaries: BrowsingSummaryReportDto[]
   suspiciousFlags: SuspiciousFlagReportDto[]
+  internalMarks: InternalMarkDto[]
+  externalMarks: ExternalMarkDto[]
 }
 
 export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
+}
+
+// AWA-04 — fee payment links. Backend: FeesController.CreateLink (already on main),
+// gated by the manage_fees permission (Finance/Admin by default — services/authz/model.fga).
+export interface FeeLinkResponse {
+  feeRecordId: string
+  paymentLink: string
+  amount: number
+  dueDate: string
+  status: string
+}
+
+export function createFeeLink(link: { studentId: string; amount: number; dueDate: string }) {
+  return request<FeeLinkResponse>('/fees/links', {
+    method: 'POST',
+    body: JSON.stringify(link),
+  })
 }
 
 export { ApiError }
