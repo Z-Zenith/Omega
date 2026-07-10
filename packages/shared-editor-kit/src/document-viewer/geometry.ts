@@ -1,0 +1,63 @@
+/**
+ * SEK-02 — pure geometry helpers for the annotation overlay.
+ *
+ * Framework-agnostic on purpose (no React, no DOM types) so it can be
+ * unit-tested directly, matching the pattern in ../notes/linkExtraction.ts.
+ *
+ * All coordinates are normalized to 0..1 page space (see the "Annotation
+ * coordinates are normalized 0..1" design rule in README.md) so this module
+ * never needs to know the rendered page's pixel size.
+ */
+
+export interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface NormalizedRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Below this width/height, a dragged rectangle is treated as a stray click, not a shape. */
+export const MIN_RECT_SIZE = 0.01;
+
+/** Below this total displacement, an ink drag is treated as a stray click/tap, not a stroke. */
+export const MIN_STROKE_LENGTH = 0.01;
+
+/** Clamp a coordinate into the normalized 0..1 page space. */
+export function clamp01(value: number): number {
+  if (Number.isNaN(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
+/** Builds a normalized rect from two drag corners, regardless of drag direction. */
+export function rectFromPoints(a: Point, b: Point): NormalizedRect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.abs(a.x - b.x),
+    height: Math.abs(a.y - b.y),
+  };
+}
+
+/** Rejects rects too small to be an intentional highlight/text-box drag (a stray click). */
+export function isRectSizable(rect: NormalizedRect): boolean {
+  return rect.width >= MIN_RECT_SIZE && rect.height >= MIN_RECT_SIZE;
+}
+
+/**
+ * Rejects ink strokes too short to be an intentional drag (a stray click/tap).
+ * Point count alone isn't enough — pointer jitter on a tap can still fire two
+ * or more move events at (near-)identical coordinates, so this also requires
+ * some point to have actually moved away from the start.
+ */
+export function isStrokeSizable(points: ReadonlyArray<Point>): boolean {
+  if (points.length < 2) return false;
+  const first = points[0]!;
+  return points.some((p) => Math.hypot(p.x - first.x, p.y - first.y) >= MIN_STROKE_LENGTH);
+}
