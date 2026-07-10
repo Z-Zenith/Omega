@@ -332,6 +332,24 @@ export function submitInternalMark(mark: {
   })
 }
 
+// TWA-06 — material upload. Backend: CommunityController.UploadMaterial (already on main).
+export interface MaterialDto {
+  id: string
+  title: string
+  fileUrl: string
+  subjectId: string | null
+  groupId: string | null
+  uploadedBy: string
+  uploadedAt: string
+}
+
+export function uploadMaterial(material: { title: string; fileUrl: string; subjectId: string | null; groupId: string | null }) {
+  return request<MaterialDto>('/materials', {
+    method: 'POST',
+    body: JSON.stringify(material),
+  })
+}
+
 // TWA-05 — community groups: create a group, list the groups you belong to, and
 // view/post within one. Backend: services/backend-api/Controllers/CommunityController.cs.
 export type GroupType = 'SubjectSection' | 'Club' | 'TeacherOnly'
