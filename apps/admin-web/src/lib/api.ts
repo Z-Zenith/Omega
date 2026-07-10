@@ -122,6 +122,61 @@ export function createEvent(event: {
   })
 }
 
+export interface DepartmentDto {
+  id: string
+  collegeId: string
+  name: string
+  hodRoleBindingId: string | null
+  hodUserId: string | null
+}
+
+export function createDepartment(department: { collegeId: string; name: string }) {
+  return request<DepartmentDto>('/departments', {
+    method: 'POST',
+    body: JSON.stringify(department),
+  })
+}
+
+export function assignHod(departmentId: string, userId: string) {
+  return request<DepartmentDto>(`/departments/${departmentId}/hod`, {
+    method: 'POST',
+    body: JSON.stringify({ userId }),
+  })
+}
+
+export interface TeacherReportDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  sectionId: string | null
+  sectionName: string | null
+  studentId: string | null
+  studentName: string | null
+  content: string
+  submittedAt: string
+}
+
+export interface UserProfileDto {
+  id: string
+  fullName: string
+  identifier: string
+  accountType: string
+  collegeId: string
+  departmentId: string | null
+  isActive: boolean
+}
+
+export function getUserProfile(id: string) {
+  return request<UserProfileDto>(`/users/${id}/profile`)
+}
+
+export function resetUserPassword(id: string, newPassword: string) {
+  return request<void>(`/users/${id}/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify(newPassword),
+  })
+}
+
 export interface RoleBindingDto {
   id: string
   userId: string
@@ -200,6 +255,67 @@ export function createUser(user: CreateUserRequest) {
   return request<CreateUserResponse>('/users', {
     method: 'POST',
     body: JSON.stringify(user),
+  })
+}
+
+// AWA-07
+export interface TeacherRemarkDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  content: string
+  submittedAt: string
+}
+
+export function getReports() {
+  return request<TeacherReportDto[]>('/reports')
+}
+
+export interface BrowsingSummaryReportDto {
+  id: string
+  summaryText: string
+  generatedAt: string
+}
+
+export interface SuspiciousFlagReportDto {
+  id: string
+  confidenceScore: number
+  flaggedAt: string
+  assignmentId: string | null
+  classSessionId: string | null
+}
+
+export interface StudentRecordDto {
+  id: string
+  fullName: string
+  identifier: string
+  accountType: string
+  collegeId: string
+  departmentId: string | null
+  isActive: boolean
+  remarks: TeacherRemarkDto[]
+  browsingSummaries: BrowsingSummaryReportDto[]
+  suspiciousFlags: SuspiciousFlagReportDto[]
+}
+
+export function getStudentRecord(userId: string) {
+  return request<StudentRecordDto>(`/users/${userId}/profile`)
+}
+
+// AWA-04 — fee payment links. Backend: FeesController.CreateLink (already on main),
+// gated by the manage_fees permission (Finance/Admin by default — services/authz/model.fga).
+export interface FeeLinkResponse {
+  feeRecordId: string
+  paymentLink: string
+  amount: number
+  dueDate: string
+  status: string
+}
+
+export function createFeeLink(link: { studentId: string; amount: number; dueDate: string }) {
+  return request<FeeLinkResponse>('/fees/links', {
+    method: 'POST',
+    body: JSON.stringify(link),
   })
 }
 

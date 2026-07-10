@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Threading;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
@@ -20,11 +22,22 @@ public partial class MainWindow : Window
 
     private readonly IAppClipboardService _clipboard = AppClipboardService.Instance;
 
+    private UsageTelemetryService? _telemetryService;
+
+    // SDA-22: set from App.axaml.cs (same lifetime/wiring as AttachTo for auto-submit).
+    // Null before that wiring happens (e.g. design-time), in which case clipboard actions
+    // are never blocked — matches "no assignment open" being the safe default.
+    private AssignmentAutoSubmitService? _autoSubmitService;
+    private CancellationTokenSource? _blockedNoticeHideCts;
+
     public MainWindow()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         Deactivated += OnDeactivated;
+        Deactivated += (_, _) => _telemetryService?.Record("window_blur");
+        Activated += (_, _) => _telemetryService?.Record("window_focus");
+        Closing += OnClosing;
 
         // SDA-21: intercept every copy/cut/paste from any TextBox in the visual tree (these
         // events bubble up from wherever the control lives — Login, Shell, Calendar, Events,
@@ -37,10 +50,29 @@ public partial class MainWindow : Window
         AddHandler(TextBox.PastingFromClipboardEvent, OnPastingFromClipboard);
     }
 
+    // SDA-12: closing the app is an "exit" event for this feature (see OnDeactivated
+    // below for the focus-loss half). The server-side ClassSessionLookup is the sole
+    // authority on whether a scheduled class session is actually active for this student
+    // right now, so the client doesn't need its own timetable check — it just always
+    // fires the ping, and it's a no-op server-side when there's nothing to notify about.
+    private void OnClosing(object? sender, WindowClosingEventArgs e) => FireExitPing();
+
+    private void FireExitPing()
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            _ = viewModel.ApiClient.ExitPingAsync();
+        }
+    }
+
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is MainWindowViewModel viewModel)
         {
+            // SDA-22: same lifetime as the window's DataContext — set once, survives
+            // sign-out/sign-in like AutoSubmitService itself does.
+            _autoSubmitService = viewModel.AutoSubmitService;
+
             viewModel.PropertyChanged += (_, args) =>
             {
                 if (args.PropertyName == nameof(MainWindowViewModel.CurrentPage))
@@ -65,12 +97,14 @@ public partial class MainWindow : Window
             _classLockService = shell.ClassLockService;
             _classLockService.LockStateChanged += OnLockStateChanged;
             ApplyLockState(_classLockService.IsLocked);
+            _telemetryService = shell.UsageTelemetryService;
         }
         else
         {
             // Logged out (or not logged in yet): no timetable to check against, so
             // there must be zero restriction.
             ApplyLockState(false);
+            _telemetryService = null;
         }
     }
 
@@ -85,6 +119,10 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(Activate);
         }
+
+        // SDA-12: losing effective focus (alt-tabbing away, switching virtual desktops,
+        // etc.) is also an "exit" event for this feature — see FireExitPing/OnClosing.
+        FireExitPing();
     }
 
     private void ApplyLockState(bool locked)
@@ -118,6 +156,12 @@ public partial class MainWindow : Window
         }
     }
 
+    // SDA-22: while an assignment is open for editing, ALL clipboard actions are blocked —
+    // including the isolated in-app clipboard from SDA-21, not just the OS one. Each handler
+    // below checks this first and, if blocked, does nothing but mark the event handled and
+    // show the notice; it never touches _clipboard at all in that case.
+    private bool IsClipboardBlocked => _autoSubmitService?.IsAssignmentOpen == true;
+
     private void OnCopyingToClipboard(object? sender, RoutedEventArgs e)
     {
         // e.Source is the TextBox that originated the event; sender is whatever element this
@@ -125,6 +169,13 @@ public partial class MainWindow : Window
         // bubbles — so the TextBox itself must be read from Source, not sender.
         if (e.Source is TextBox textBox)
         {
+            if (IsClipboardBlocked)
+            {
+                ShowClipboardBlockedNotice();
+                e.Handled = true;
+                return;
+            }
+
             var selection = textBox.SelectedText;
             if (!string.IsNullOrEmpty(selection))
             {
@@ -140,6 +191,13 @@ public partial class MainWindow : Window
     {
         if (e.Source is TextBox textBox)
         {
+            if (IsClipboardBlocked)
+            {
+                ShowClipboardBlockedNotice();
+                e.Handled = true;
+                return;
+            }
+
             var selection = textBox.SelectedText;
             if (!string.IsNullOrEmpty(selection))
             {
@@ -157,15 +215,51 @@ public partial class MainWindow : Window
     {
         if (e.Source is TextBox textBox)
         {
+            if (IsClipboardBlocked)
+            {
+                ShowClipboardBlockedNotice();
+                e.Handled = true;
+                return;
+            }
+
             var text = _clipboard.GetText();
             if (!string.IsNullOrEmpty(text))
             {
                 // Mirrors TextBox.Paste(): insert at the caret / replace the current selection.
                 textBox.SelectedText = text;
+                // SDA-25: paste char_count feeds AIS-07's large-paste-burst heuristic.
+                _telemetryService?.Record("paste", new Dictionary<string, object> { ["char_count"] = text.Length });
             }
 
             // Prevent TextBox.Paste() from also reading from the real OS clipboard.
             e.Handled = true;
+        }
+    }
+
+    private void ShowClipboardBlockedNotice()
+    {
+        _blockedNoticeHideCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _blockedNoticeHideCts = cts;
+
+        ClipboardBlockedNotice.IsVisible = true;
+
+        _ = HideNoticeAfterDelayAsync(cts.Token);
+    }
+
+    private async System.Threading.Tasks.Task HideNoticeAfterDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(2), token);
+            if (!token.IsCancellationRequested)
+            {
+                ClipboardBlockedNotice.IsVisible = false;
+            }
+        }
+        catch (System.Threading.Tasks.TaskCanceledException)
+        {
+            // Superseded by a newer blocked attempt — that one owns hiding the notice.
         }
     }
 }

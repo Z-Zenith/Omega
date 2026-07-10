@@ -87,7 +87,7 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 | granted_by | uuid FK → users | AWA-13 |
 | created_at | timestamptz | |
 
-*Note: these tables mirror what's mechanically enforced by OpenFGA (Section 9 of the architecture doc) — the tables are your source of truth for writes, OpenFGA answers the "can this user do X" query at read time. Keep them in sync via the same write path, never write to one without the other. Seed `permissions` and `role_default_permissions` from the architecture doc's Section 9 catalog table directly — don't let the two documents drift.*
+*Note: these tables are the actual, sole enforcement mechanism — `Services/PermissionService.cs` in Backend API queries them directly on every permission check. `services/authz/model.fga` documents the same ReBAC shape conceptually (Section 9), but no OpenFGA client exists in Backend API and the model is never loaded into a running store (see #76) — it is not wired in and does not enforce anything. Seed `permissions` and `role_default_permissions` from the architecture doc's Section 9 catalog table directly, and keep `model.fga` in sync by hand if it's edited, but do not rely on OpenFGA to answer authorization queries.*
 
 **`user_sessions`**
 | Column | Type | Notes |
@@ -195,7 +195,7 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 **`plagiarism_reports`** (AIS-02, Copyleaks) — `id`, `submission_id` FK, `similarity_score`, `copyleaks_scan_id` text, `matched_sources` jsonb, `checked_at`
 **`copy_check_flags`** (AIS-03) — `id`, `submission_a_id` FK, `submission_b_id` FK, `similarity_score` (flagged at ≥ 90%), `flagged_at`
 **`ai_detection_reports`** (AIS-05, Pangram) — `id`, `submission_id` FK, `ai_likelihood_score`, `pangram_report_id` text, `checked_at`
-**`autograde_suggestions`** (AIS-04) — `id`, `submission_id` FK, `suggested_grade`, `confirmed_by_teacher` boolean, `confirmed_at` nullable
+**`autograde_suggestions`** (AIS-04) — `id`, `submission_id` FK, `suggested_grade`, `confidence` numeric nullable, `matched_criteria` jsonb nullable, `feedback` jsonb nullable, `confirmed_by_teacher` boolean, `confirmed_at` nullable
 
 ### 1.5 Marks
 
@@ -369,6 +369,11 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | POST | `/marks/external/{id}/approve` | TWA-20 |
 | GET | `/marks/mine` | SDA-15 |
 | GET | `/marks/ward/{studentId}` | PRT-02 |
+
+### Subjects
+| Method | Path | Feature |
+|---|---|---|
+| GET | `/subjects/mine` | SDA-18 |
 
 ### Community
 | Method | Path | Feature |

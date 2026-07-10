@@ -49,7 +49,7 @@ import type {
   ImageSearchProps,
 } from '../src/index.js';
 
-import { LANGUAGE_LABELS } from '../src/index.js';
+import { CodeEditor, LANGUAGE_LABELS, isSupportedLanguage } from '../src/index.js';
 
 // ---- subpath imports also resolve (tree-shaking contract) ----
 import type { CodeEditorProps as CEP } from '../src/code-editor/index.js';
@@ -122,6 +122,23 @@ void _codeEditor;
 const _annotationChange: AnnotationChange = { op: 'delete', id: 'a1' };
 void _annotationChange;
 
+const _documentViewer: DocumentViewerProps = {
+  user,
+  document: { id: 'd1', type: 'pdf', fileUrl: 'https://example.com/d1.pdf' },
+  initialAnnotations: [],
+  canAnnotate: true,
+  canOcr: true,
+  onAnnotationChange: async (_change: AnnotationChange): Promise<Result<Annotation, SekError>> => ({
+    ok: true,
+    value: { kind: 'highlight', id: 'a1', page: 1, rect: { x: 0, y: 0, width: 0.1, height: 0.1 }, color: '#FFEB3B', createdAt: '', createdBy: 'u1' },
+  }),
+  onOcrPage: async (_page: number): Promise<Result<OcrPageResult, SekError>> => ({
+    ok: true,
+    value: { page: 1, text: '', words: [] },
+  }),
+};
+void _documentViewer;
+
 // SEK-03 — NoteLinkRef round-trips
 const _link: NoteLinkRef = { toNoteId: 'n2', anchor: 'see also' };
 void _link;
@@ -143,6 +160,13 @@ declare const _notesApi: NotesEditorApi;
 void _codeApi;
 void _viewerApi;
 void _notesApi;
+
+// SEK-01 — CodeEditor and isSupportedLanguage resolve from the barrel (this
+// would fail to compile if code-editor/index.ts's re-export path broke).
+declare const _codeEditorComponent: typeof CodeEditor;
+void _codeEditorComponent;
+const _isPythonSupported: boolean = isSupportedLanguage('python');
+void _isPythonSupported;
 
 // Type-only re-exports compile (this would fail if any barrel or subpath
 // export broke) — one field per symbol instead of a separate alias + void
