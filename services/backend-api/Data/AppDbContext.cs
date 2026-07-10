@@ -753,7 +753,10 @@ public partial class AppDbContext : DbContext
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
 
-            entity.HasOne(d => d.User).WithOne(p => p.UserSession).HasConstraintName("user_sessions_user_id_fkey");
+            // #92 — one user can have many historical (inactive) session rows; only the
+            // partial unique index (is_active = true) enforces "one active session" at the
+            // DB level, so this must be a one-to-many, not one-to-one.
+            entity.HasOne(d => d.User).WithMany(p => p.UserSessions).HasConstraintName("user_sessions_user_id_fkey");
         });
 
         modelBuilder.Entity<WhitelistRequest>(entity =>
