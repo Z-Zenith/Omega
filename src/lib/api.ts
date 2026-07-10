@@ -258,6 +258,33 @@ export function createUser(user: CreateUserRequest) {
   })
 }
 
+// AWA-12 — Admin can create community groups directly (in addition to viewing all
+// existing groups, AWA-06). Same POST /groups endpoint TWA-05 uses, gated by the
+// `create_group` permission (Lecturer/HoD/Admin by default — see services/authz/model.fga
+// and db/init/02_seed_roles_and_permissions.sql), so a group created here is
+// indistinguishable in structure from one a teacher creates.
+export type GroupType = 'SubjectSection' | 'Club' | 'TeacherOnly'
+
+export interface CreateGroupRequest {
+  name: string
+  type: GroupType
+  sectionId: string | null
+}
+
+export interface GroupDto {
+  id: string
+  name: string
+  type: string
+  sectionId: string | null
+}
+
+export function createGroup(group: CreateGroupRequest) {
+  return request<GroupDto>('/groups', {
+    method: 'POST',
+    body: JSON.stringify(group),
+  })
+}
+
 // AWA-07
 export interface TeacherRemarkDto {
   id: string
