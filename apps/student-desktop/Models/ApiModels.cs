@@ -39,6 +39,19 @@ public record NoteDto(Guid Id, string Title, string ContentMarkdown, DateTime Cr
 
 public record NoteSummaryDto(Guid Id, string Title, DateTime UpdatedAt);
 
+// SDA-17. SubjectName is display-only context for the picker — the feedback itself
+// (SubmitTeacherFeedbackRequest) only carries TeacherId, matching the backend's
+// teacher_feedback schema, which has no subject/course column.
+public record MyTeacherDto(Guid TeacherId, string TeacherName, Guid SubjectId, string SubjectName);
+
+public record SubmitTeacherFeedbackRequest(Guid TeacherId, int Rating, string? Comments);
+
+public record TeacherFeedbackDto(Guid Id, Guid TeacherId, int Rating, string? Comments, DateTime SubmittedAt);
+
+// SDA-18. TeacherId/TeacherName are always present — every row comes from a
+// TeacherSectionAssignment, which by definition always names a teacher.
+public record MySubjectDto(Guid SubjectId, string SubjectCode, string SubjectName, Guid TeacherId, string TeacherName);
+
 // SDA-11: request/response shapes for the auto-submit-on-exit endpoint
 // (POST /api/v1/assignments/{id}/submissions/auto-submit). SubmissionFormat mirrors the
 // backend's AssignmentType enum, serialized as a string (see Program.cs JsonStringEnumConverter).
@@ -54,3 +67,10 @@ public record SendMessageRequest(string Content);
 public record DmsMessageDto(Guid Id, Guid ThreadId, Guid SenderId, string Content, DateTime SentAt, DateTime? ReadAt);
 
 public record DmsThreadSummaryDto(Guid Id, Guid StudentId, Guid TeacherId, DateTime CreatedAt, DmsMessageDto? LastMessage);
+
+// SDA-25: no ClassSessionId here — the client only ever claims an AssignmentId it
+// already knows (from having opened that assignment); the backend resolves the active
+// class session itself when AssignmentId is omitted (see TelemetryController).
+public record TelemetryEventRequest(string EventType, Dictionary<string, object>? Metadata, Guid? AssignmentId, DateTime RecordedAt);
+
+public record SubmitTelemetryRequest(IReadOnlyList<TelemetryEventRequest> Events);

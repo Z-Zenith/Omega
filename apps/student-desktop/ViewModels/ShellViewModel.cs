@@ -22,16 +22,23 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
     public BrowserViewModel BrowserViewModel { get; }
     public NotesViewModel NotesViewModel { get; }
     public MessagesViewModel MessagesViewModel { get; }
+    public TeacherFeedbackViewModel TeacherFeedbackViewModel { get; }
+    public CourseInfoViewModel CourseInfoViewModel { get; }
 
     // SDA-01: owned for the lifetime of the signed-in session. Started here so the
     // class-time lock is active as soon as the student is logged in, and stopped/
     // disposed on sign-out so no restriction (and no timer) lingers past the session.
     public ClassLockService ClassLockService { get; }
 
+    // SDA-25: owned for the lifetime of the signed-in session, same as ClassLockService —
+    // it reads ClassLockService.IsLocked and the app-lifetime AssignmentAutoSubmitService
+    // to decide whether a class/assignment window is currently active.
+    public UsageTelemetryService UsageTelemetryService { get; }
+
     [ObservableProperty]
     private ViewModelBase _currentPage;
 
-    public ShellViewModel(ApiClient apiClient, Guid userId, string fullName, Action onSignOut)
+    public ShellViewModel(ApiClient apiClient, Guid userId, string fullName, Action onSignOut, AssignmentAutoSubmitService autoSubmitService)
     {
         _apiClient = apiClient;
         _onSignOut = onSignOut;
@@ -43,10 +50,15 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
         BrowserViewModel = new BrowserViewModel(apiClient);
         NotesViewModel = new NotesViewModel(apiClient, userId);
         MessagesViewModel = new MessagesViewModel(apiClient, userId);
+        TeacherFeedbackViewModel = new TeacherFeedbackViewModel(apiClient);
+        CourseInfoViewModel = new CourseInfoViewModel(apiClient);
         _currentPage = CalendarViewModel;
 
         ClassLockService = new ClassLockService(apiClient);
         ClassLockService.Start();
+
+        UsageTelemetryService = new UsageTelemetryService(apiClient, ClassLockService, autoSubmitService);
+        UsageTelemetryService.Start();
     }
 
     [RelayCommand]
@@ -71,6 +83,12 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
     private void ShowMessages() => CurrentPage = MessagesViewModel;
 
     [RelayCommand]
+    private void ShowTeacherFeedback() => CurrentPage = TeacherFeedbackViewModel;
+
+    [RelayCommand]
+    private void ShowCourseInfo() => CurrentPage = CourseInfoViewModel;
+
+    [RelayCommand]
     private async Task SignOutAsync()
     {
         try
@@ -93,5 +111,6 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
         }
         _disposed = true;
         ClassLockService.Dispose();
+        UsageTelemetryService.Dispose();
     }
 }
