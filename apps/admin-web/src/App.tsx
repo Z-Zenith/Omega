@@ -11,6 +11,7 @@ import { PasswordResetPage } from '@/pages/PasswordResetPage'
 import { RolesPage } from '@/pages/RolesPage'
 import { CreateAccountPage } from '@/pages/CreateAccountPage'
 import { StudentRecordPage } from '@/pages/StudentRecordPage'
+import { AllGroupsPage } from '@/pages/AllGroupsPage'
 import { CreateGroupPage } from '@/pages/CreateGroupPage'
 import { FeesPage } from '@/pages/FeesPage'
 
@@ -56,6 +57,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/accounts/new">Create account</Link>
           <Link to="/groups/new">Create group</Link>
           <Link to="/students">Student Records</Link>
+          <Link to="/groups">All Groups</Link>
           <Link to="/fees">Fees</Link>
         </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -163,6 +165,16 @@ function App() {
             <RequireAuth>
               <Shell>
                 <StudentRecordPage />
+              </Shell>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/groups"
+          element={
+            <RequireAuth>
+              <Shell>
+                <AllGroupsPage />
               </Shell>
             </RequireAuth>
           }
