@@ -4,9 +4,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { getStudentRecord, ApiError } from '@/lib/api'
 
-// AWA-07: Admin looks up any student's info, teacher remarks, and system-generated
-// reports by user ID — there's no student directory/search endpoint yet, so this
-// mirrors RolesPage's raw-ID-input pattern rather than a picker.
+// AWA-07, AWA-08: Admin looks up any student's info, teacher remarks, system-generated
+// reports, and academic performance by user ID — there's no student directory/search
+// endpoint yet, so this mirrors RolesPage's raw-ID-input pattern rather than a picker.
+// Marks come from the same GetProfile response as remarks/reports (one endpoint, one
+// query path per feature), so AWA-08's "matches what the student sees in SDA-15, not a
+// separate copy" holds by construction.
 export function StudentRecordPage() {
   const [studentId, setStudentId] = useState('')
   const [lookupId, setLookupId] = useState<string | null>(null)
@@ -23,9 +26,9 @@ export function StudentRecordPage() {
         <CardHeader>
           <CardTitle>Student record</CardTitle>
           <CardDescription>
-            View any student's information, teacher-submitted remarks, and system-generated
-            reports — remarks stay visible even if the submitting teacher's account is later
-            deactivated.
+            View any student's information, teacher-submitted remarks, system-generated
+            reports, and academic performance — remarks stay visible even if the submitting
+            teacher's account is later deactivated.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -50,7 +53,7 @@ export function StudentRecordPage() {
           {recordQuery.isError && (
             <p className="mt-4 text-sm text-destructive">
               {recordQuery.error instanceof ApiError && recordQuery.error.status === 403
-                ? "You don't hold the view_all_student_records permission, or this isn't a student in your college."
+                ? "You don't hold the view_all_student_records or view_all_student_performance permission, or this isn't a student in your college."
                 : recordQuery.error instanceof ApiError && recordQuery.error.status === 404
                   ? 'No user exists with that ID.'
                   : 'Failed to load the student record.'}
@@ -113,6 +116,35 @@ export function StudentRecordPage() {
                       <div className="mt-1 text-xs text-muted-foreground">
                         {new Date(flag.flaggedAt).toLocaleString()}
                       </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium">Academic performance</h4>
+                {recordQuery.data.internalMarks.length === 0 && recordQuery.data.externalMarks.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No published marks yet.</p>
+                )}
+                <div className="mt-2 flex flex-col gap-2">
+                  {recordQuery.data.internalMarks.map((mark) => (
+                    <div key={`internal-${mark.subjectId}`} className="rounded-md border px-3 py-2 text-sm">
+                      {mark.subjectName} — {mark.marks} marks
+                      {mark.publishedAt && (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Published {new Date(mark.publishedAt).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {recordQuery.data.externalMarks.map((mark) => (
+                    <div key={`external-${mark.subjectId}`} className="rounded-md border px-3 py-2 text-sm">
+                      {mark.subjectName} — grade {mark.grade}
+                      {mark.approvedAt && (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          Approved {new Date(mark.approvedAt).toLocaleString()}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
