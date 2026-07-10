@@ -19,6 +19,7 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
     public EventsViewModel EventsViewModel { get; }
     public ChangePasswordViewModel ChangePasswordViewModel { get; }
     public MarksViewModel MarksViewModel { get; }
+    public CommunityViewModel CommunityViewModel { get; }
     public BrowserViewModel BrowserViewModel { get; }
     public NotesViewModel NotesViewModel { get; }
     public MessagesViewModel MessagesViewModel { get; }
@@ -47,6 +48,7 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
         EventsViewModel = new EventsViewModel(apiClient);
         ChangePasswordViewModel = new ChangePasswordViewModel(apiClient);
         MarksViewModel = new MarksViewModel(apiClient);
+        CommunityViewModel = new CommunityViewModel(apiClient);
         BrowserViewModel = new BrowserViewModel(apiClient);
         NotesViewModel = new NotesViewModel(apiClient, userId);
         MessagesViewModel = new MessagesViewModel(apiClient, userId);
@@ -72,6 +74,9 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
 
     [RelayCommand]
     private void ShowMarks() => CurrentPage = MarksViewModel;
+
+    [RelayCommand]
+    private void ShowCommunity() => CurrentPage = CommunityViewModel;
 
     [RelayCommand]
     private void ShowBrowser() => CurrentPage = BrowserViewModel;

@@ -103,6 +103,33 @@ public class ApiClient
             ?? throw new ApiException(500, "Empty auto-submit response");
     }
 
+    // SDA-16
+    public async Task<List<GroupDto>> GetMyGroupsAsync()
+    {
+        var response = await SendAsync(HttpMethod.Get, "/api/v1/groups/mine");
+        var body = await response.Content.ReadFromJsonAsync<MyGroupsResponse>(JsonOptions);
+        return body?.Groups ?? [];
+    }
+
+    public async Task<List<GroupPostDto>> GetGroupPostsAsync(Guid groupId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/groups/{groupId}/posts");
+        return await response.Content.ReadFromJsonAsync<List<GroupPostDto>>(JsonOptions) ?? [];
+    }
+
+    public async Task<GroupPostDto> CreateGroupPostAsync(Guid groupId, string content)
+    {
+        var response = await SendAsync(HttpMethod.Post, $"/api/v1/groups/{groupId}/posts", new CreatePostRequest(content));
+        return await response.Content.ReadFromJsonAsync<GroupPostDto>(JsonOptions)
+            ?? throw new ApiException(500, "Empty post response");
+    }
+
+    public async Task<List<MaterialDto>> GetGroupMaterialsAsync(Guid groupId)
+    {
+        var response = await SendAsync(HttpMethod.Get, $"/api/v1/groups/{groupId}/materials");
+        return await response.Content.ReadFromJsonAsync<List<MaterialDto>>(JsonOptions) ?? [];
+    }
+
     // SDA-03/SDA-04
     public async Task<WhitelistResponse> GetWhitelistAsync()
     {
