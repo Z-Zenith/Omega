@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
-namespace BackendApi.Tests;
+namespace BackendApi.Tests.Controllers;
 
 public class FeesControllerTests
 {
