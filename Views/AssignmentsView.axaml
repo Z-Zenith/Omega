@@ -1,0 +1,47 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:avconv="using:Avalonia.Data.Converters"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+             x:Class="StudentDesktop.Views.AssignmentsView"
+             x:DataType="vm:AssignmentsViewModel">
+
+    <ScrollViewer>
+        <StackPanel Margin="24" Spacing="12" MaxWidth="480">
+            <TextBlock Text="Submit an assignment" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="SDA-10 — the format must match the assignment's type; late submissions are flagged, not silently accepted."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+
+            <TextBlock Text="Assignment ID"/>
+            <TextBox Text="{Binding AssignmentId}" PlaceholderText="Assignment ID (GUID)"/>
+
+            <TextBlock Text="Submission format"/>
+            <ComboBox SelectedItem="{Binding SubmissionFormat}" HorizontalAlignment="Stretch">
+                <ComboBox.Items>
+                    <x:String>Code</x:String>
+                    <x:String>Quiz</x:String>
+                    <x:String>Essay</x:String>
+                    <x:String>FileUpload</x:String>
+                </ComboBox.Items>
+            </ComboBox>
+
+            <TextBlock Text="Content"/>
+            <TextBox Text="{Binding ContentUrl}" AcceptsReturn="True" TextWrapping="Wrap" Height="140"
+                      PlaceholderText="Code, quiz answers, essay text, or a file URL — depending on the format above."/>
+
+            <Button Content="Submit" Command="{Binding SubmitCommand}"/>
+
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed" TextWrapping="Wrap"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+
+            <StackPanel IsVisible="{Binding LastSubmission, Converter={x:Static avconv:ObjectConverters.IsNotNull}}" Spacing="4">
+                <TextBlock Text="Submitted." Foreground="Green" FontWeight="Bold"/>
+                <TextBlock Text="{Binding LastSubmission.SubmittedAt, StringFormat='Submitted at {0}'}"/>
+                <TextBlock Text="Flagged as late." Foreground="OrangeRed" IsVisible="{Binding LastSubmission.IsLate}"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>
