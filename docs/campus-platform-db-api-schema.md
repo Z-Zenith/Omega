@@ -415,6 +415,7 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | POST | `/fees/links` | AWA-04 |
 | POST | `/fees/{id}/pay` | PRT-03 |
 | GET | `/fees/ward/{studentId}` | PRT-02 |
+| POST | `/fees/send-reminders` | AWA-05 |
 
 ### Parent Portal
 | Method | Path | Feature |
