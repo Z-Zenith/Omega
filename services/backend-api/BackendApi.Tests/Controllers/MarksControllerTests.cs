@@ -203,4 +203,33 @@ public class MarksControllerTests
         Assert.Equal(75, dto.Marks);
         Assert.Single(await db.InternalMarks.ToListAsync());
     }
+
+    // #83 — regression coverage: CreateExternal/ApproveExternal (TWA-17/TWA-20) already had
+    // [Authorize] + an add_external_marks/approve_external_marks permission check wired (not
+    // the 501-stub-with-no-auth state #83 was originally filed against), but lacked test
+    // coverage locking that guard in place. SeedAsync's default fixture only grants
+    // add_internal_marks, so the teacher here has neither external-marks permission.
+    [Fact]
+    public async Task CreateExternal_Forbidden_WhenCallerLacksAddExternalMarksPermission()
+    {
+        using var db = NewDb();
+        var fixture = await SeedAsync(db);
+        var controller = BuildController(db, fixture.TeacherId);
+
+        var result = await controller.CreateExternal(new CreateExternalMarkRequest(fixture.StudentId, fixture.SubjectId, "A"));
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task ApproveExternal_Forbidden_WhenCallerLacksApproveExternalMarksPermission()
+    {
+        using var db = NewDb();
+        var fixture = await SeedAsync(db);
+        var controller = BuildController(db, fixture.TeacherId);
+
+        var result = await controller.ApproveExternal(Guid.NewGuid());
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
 }

@@ -35,6 +35,9 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return Forbid();
         }
 
+        // #131: only the raw secret (used below for the one-time provisioning URI/response)
+        // ever exists outside the DB. What lands in User.TotpSecret is always the encrypted
+        // form — never the raw Base32 value GenerateSecret() returns.
         var totpSecret = totpService.GenerateSecret();
 
         var user = new User
@@ -44,7 +47,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             AccountType = request.AccountType,
             Identifier = request.Identifier,
             PasswordHash = passwordHasher.Hash(request.InitialPassword),
-            TotpSecret = totpSecret,
+            TotpSecret = totpService.Protect(totpSecret),
             FullName = request.FullName,
             DepartmentId = request.DepartmentId,
             IsActive = true,
@@ -122,7 +125,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
     // [Authorize] to this controller (for AWA-07) doesn't leave this reachable — and
     // able to take over any account — for any authenticated caller regardless of role.
     [HttpPost("{id}/reset-password")]
-    public async Task<IActionResult> ResetPassword(Guid id, [FromBody] string newPassword)
+    public async Task<IActionResult> ResetPassword(Guid id, [FromBody] ResetPasswordRequest request)
     {
         var caller = await CurrentUserAsync();
         if (caller is null)
@@ -140,7 +143,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return NotFound();
         }
 
-        user.PasswordHash = passwordHasher.Hash(newPassword);
+        user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         await db.SaveChangesAsync();
         return NoContent();
     }
