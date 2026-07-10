@@ -28,9 +28,12 @@ public record WhitelistSiteDto(Guid Id, string Url, DateTime ApprovedAt);
 public record WhitelistResponse(List<WhitelistSiteDto> Sites);
 
 // SDA-08, SEK-03
-public record CreateNoteRequest(string Title, string ContentMarkdown);
+// SDA-19: outgoing links as parsed by SEK's own extractOutgoingLinks, forwarded as-is.
+public record NoteLinkInput(Guid ToNoteId, string Anchor);
 
-public record UpdateNoteRequest(string Title, string ContentMarkdown);
+public record CreateNoteRequest(string Title, string ContentMarkdown, Guid? Id = null, IReadOnlyList<NoteLinkInput>? Links = null);
+
+public record UpdateNoteRequest(string Title, string ContentMarkdown, IReadOnlyList<NoteLinkInput>? Links = null);
 
 public record NoteDto(Guid Id, string Title, string ContentMarkdown, DateTime CreatedAt, DateTime UpdatedAt);
 
@@ -42,3 +45,12 @@ public record NoteSummaryDto(Guid Id, string Title, DateTime UpdatedAt);
 public record SubmitAssignmentRequest(string ContentUrl, string SubmissionFormat);
 
 public record SubmissionDto(Guid Id, Guid AssignmentId, Guid StudentId, string ContentUrl, DateTime SubmittedAt, bool IsLate, bool IsAutosubmitted);
+
+// SDA-24, DMS-01: mirrors services/backend-api's MessageResponse/ThreadSummaryResponse
+// field-for-field (see MessagingController.cs) — same shapes DmsBridge forwards to the
+// DMS host bundle over the JS bridge.
+public record SendMessageRequest(string Content);
+
+public record DmsMessageDto(Guid Id, Guid ThreadId, Guid SenderId, string Content, DateTime SentAt, DateTime? ReadAt);
+
+public record DmsThreadSummaryDto(Guid Id, Guid StudentId, Guid TeacherId, DateTime CreatedAt, DmsMessageDto? LastMessage);

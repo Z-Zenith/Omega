@@ -20,6 +20,8 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
     public ChangePasswordViewModel ChangePasswordViewModel { get; }
     public MarksViewModel MarksViewModel { get; }
     public BrowserViewModel BrowserViewModel { get; }
+    public NotesViewModel NotesViewModel { get; }
+    public MessagesViewModel MessagesViewModel { get; }
 
     // SDA-01: owned for the lifetime of the signed-in session. Started here so the
     // class-time lock is active as soon as the student is logged in, and stopped/
@@ -29,7 +31,7 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private ViewModelBase _currentPage;
 
-    public ShellViewModel(ApiClient apiClient, string fullName, Action onSignOut)
+    public ShellViewModel(ApiClient apiClient, Guid userId, string fullName, Action onSignOut)
     {
         _apiClient = apiClient;
         _onSignOut = onSignOut;
@@ -39,6 +41,8 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
         ChangePasswordViewModel = new ChangePasswordViewModel(apiClient);
         MarksViewModel = new MarksViewModel(apiClient);
         BrowserViewModel = new BrowserViewModel(apiClient);
+        NotesViewModel = new NotesViewModel(apiClient, userId);
+        MessagesViewModel = new MessagesViewModel(apiClient, userId);
         _currentPage = CalendarViewModel;
 
         ClassLockService = new ClassLockService(apiClient);
@@ -59,6 +63,12 @@ public partial class ShellViewModel : ViewModelBase, IDisposable
 
     [RelayCommand]
     private void ShowBrowser() => CurrentPage = BrowserViewModel;
+
+    [RelayCommand]
+    private void ShowNotes() => CurrentPage = NotesViewModel;
+
+    [RelayCommand]
+    private void ShowMessages() => CurrentPage = MessagesViewModel;
 
     [RelayCommand]
     private async Task SignOutAsync()

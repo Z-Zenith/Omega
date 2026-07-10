@@ -377,6 +377,8 @@ All routes prefixed `/api/v1`. Every write endpoint checks the caller's effectiv
 | GET | `/notes/{id}` | SDA-08 |
 | POST | `/notes` | SDA-08 |
 | PATCH | `/notes/{id}` | SDA-08 |
+| DELETE | `/notes/{id}` | SDA-19 |
+| GET | `/notes/{id}/backlinks` | SDA-19 |
 
 ### Community
 | Method | Path | Feature |
