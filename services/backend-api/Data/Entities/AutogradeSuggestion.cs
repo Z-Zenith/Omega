@@ -19,6 +19,15 @@ public partial class AutogradeSuggestion
     [Column("suggested_grade")]
     public decimal SuggestedGrade { get; set; }
 
+    [Column("confidence")]
+    public decimal? Confidence { get; set; }
+
+    [Column("matched_criteria", TypeName = "jsonb")]
+    public string? MatchedCriteria { get; set; }
+
+    [Column("feedback", TypeName = "jsonb")]
+    public string? Feedback { get; set; }
+
     [Column("confirmed_by_teacher")]
     public bool ConfirmedByTeacher { get; set; }
 

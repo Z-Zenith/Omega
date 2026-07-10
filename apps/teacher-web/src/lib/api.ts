@@ -127,6 +127,18 @@ export interface MarkAttendanceResponse {
   records: MarkedAttendanceDto[]
 }
 
+export interface AttendanceAlertDto {
+  studentId: string
+  studentName: string
+  sectionId: string
+  sectionName: string
+  attendancePercentage: number
+}
+
+export function getAttendanceAlerts() {
+  return request<AttendanceAlertDto[]>('/attendance/alerts')
+}
+
 export function markAttendance(
   timetableSlotId: string,
   entries: { studentId: string; status: AttendanceStatus }[],
@@ -154,6 +166,31 @@ export function submitSectionFeedback(sectionId: string, rating: number, comment
   })
 }
 
+export interface StudentAttendanceDto {
+  studentId: string
+  studentName: string
+  attendancePercentage: number | null
+}
+
+export interface SubjectMarksSummaryDto {
+  subjectId: string
+  subjectName: string
+  averageMarks: number | null
+  studentsGraded: number
+}
+
+export interface SectionPerformanceSummaryDto {
+  sectionId: string
+  sectionName: string
+  overallAttendancePercentage: number | null
+  studentAttendance: StudentAttendanceDto[]
+  marksBySubject: SubjectMarksSummaryDto[]
+}
+
+export function getSectionPerformanceSummary(sectionId: string) {
+  return request<SectionPerformanceSummaryDto>(`/timetable/sections/${sectionId}/performance-summary`)
+}
+
 export interface EventDto {
   id: string
   title: string
@@ -172,6 +209,83 @@ export function createEvent(event: {
   return request<EventDto>('/events', {
     method: 'POST',
     body: JSON.stringify(event),
+  })
+}
+
+export interface TeacherReportDto {
+  id: string
+  teacherId: string
+  teacherName: string
+  sectionId: string | null
+  sectionName: string | null
+  studentId: string | null
+  studentName: string | null
+  content: string
+  submittedAt: string
+}
+
+export function createReport(report: { sectionId?: string | null; studentId?: string | null; content: string }) {
+  return request<TeacherReportDto>('/reports', {
+    method: 'POST',
+    body: JSON.stringify({
+      sectionId: report.sectionId ?? null,
+      studentId: report.studentId ?? null,
+      content: report.content,
+    }),
+  })
+}
+
+export interface ExternalMarksPermissionStatus {
+  granted: boolean
+  expiresAt: string | null
+}
+
+export function getExternalMarksPermissionStatus() {
+  return request<ExternalMarksPermissionStatus>('/marks/external/permission-status')
+}
+
+export interface ExternalMarkSubmission {
+  id: string
+  studentId: string
+  subjectId: string
+  grade: string
+  status: string
+  submittedAt: string
+}
+
+export function submitExternalMark(mark: { studentId: string; subjectId: string; grade: string }) {
+  return request<ExternalMarkSubmission>('/marks/external', {
+    method: 'POST',
+    body: JSON.stringify(mark),
+  })
+}
+
+// TWA-20
+export interface PendingExternalMarkDto {
+  id: string
+  studentId: string
+  studentFullName: string
+  subjectId: string
+  subjectName: string
+  grade: string
+  submittedBy: string
+  submittedByFullName: string
+  submittedAt: string
+}
+
+export function getPendingExternalMarks() {
+  return request<PendingExternalMarkDto[]>('/marks/external/pending')
+}
+
+export interface ApproveExternalMarkResponse {
+  id: string
+  approvedBy: string
+  approvedAt: string
+}
+
+export function approveExternalMark(id: string) {
+  return request<ApproveExternalMarkResponse>(`/marks/external/${id}/approve`, {
+    method: 'POST',
   })
 }
 

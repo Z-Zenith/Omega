@@ -35,6 +35,9 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return Forbid();
         }
 
+        // #131: only the raw secret (used below for the one-time provisioning URI/response)
+        // ever exists outside the DB. What lands in User.TotpSecret is always the encrypted
+        // form — never the raw Base32 value GenerateSecret() returns.
         var totpSecret = totpService.GenerateSecret();
 
         var user = new User
@@ -44,7 +47,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             AccountType = request.AccountType,
             Identifier = request.Identifier,
             PasswordHash = passwordHasher.Hash(request.InitialPassword),
-            TotpSecret = totpSecret,
+            TotpSecret = totpService.Protect(totpSecret),
             FullName = request.FullName,
             DepartmentId = request.DepartmentId,
             IsActive = true,
@@ -57,9 +60,16 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         return CreatedAtAction(nameof(Create), new { id = user.Id }, new CreateUserResponse(user.Id, provisioningUri, totpSecret));
     }
 
-    // AWA-07, AWA-08. Self-view needs no special permission; viewing another user's
-    // record is scoped to students only and requires view_all_student_records — this
-    // endpoint doesn't double as a general "view any employee's profile" API.
+    // AWA-07, AWA-08. Self-view needs no special permission. Viewing another user's
+    // record is scoped to students in the caller's own college; view_all_student_records
+    // and view_all_student_performance are gated *independently per data section* below —
+    // NOT ORed into one blanket gate. AWA-13 lets Admin grant either permission code to a
+    // user on its own (e.g. a registrar granted view_all_student_performance only, for
+    // report-card generation), specifically so it can diverge from view_all_student_records
+    // (remarks/browsing-history/suspicious-flags are materially more sensitive than marks).
+    // Collapsing the two into an OR would let a marks-only grant see disciplinary/behavioural
+    // data it was never meant to reach — so each section checks its own permission, and only
+    // the "is this a valid target at all" gate is shared.
     [HttpGet("{id}/profile")]
     public async Task<ActionResult<StudentRecordDto>> GetProfile(Guid id)
     {
@@ -76,10 +86,14 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         }
 
         var isSelf = caller.Id == id;
-        if (!isSelf
-            && (user.AccountType != AccountType.Student
-                || user.CollegeId != caller.CollegeId
-                || !await permissions.HasPermissionAsync(caller.Id, "view_all_student_records")))
+        var isValidCrossViewTarget = user.AccountType == AccountType.Student && user.CollegeId == caller.CollegeId;
+
+        var canViewRecords = isSelf
+            || (isValidCrossViewTarget && await permissions.HasPermissionAsync(caller.Id, "view_all_student_records"));
+        var canViewPerformance = isSelf
+            || (isValidCrossViewTarget && await permissions.HasPermissionAsync(caller.Id, "view_all_student_performance"));
+
+        if (!canViewRecords && !canViewPerformance)
         {
             return Forbid();
         }
@@ -87,23 +101,39 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         // r.Teacher.FullName in the projection below joins regardless of Teacher.IsActive —
         // a remark must survive the submitting teacher being deactivated later (AWA-07
         // acceptance criterion).
-        var remarks = await db.TeacherReports
-            .Where(r => r.StudentId == id)
-            .OrderByDescending(r => r.SubmittedAt)
-            .Select(r => new TeacherRemarkDto(r.Id, r.TeacherId, r.Teacher.FullName, r.Content, r.SubmittedAt))
-            .ToListAsync();
+        var remarks = canViewRecords
+            ? await db.TeacherReports
+                .Where(r => r.StudentId == id)
+                .OrderByDescending(r => r.SubmittedAt)
+                .Select(r => new TeacherRemarkDto(r.Id, r.TeacherId, r.Teacher.FullName, r.Content, r.SubmittedAt))
+                .ToListAsync()
+            : [];
 
-        var browsingSummaries = await db.BrowsingHistorySummaries
-            .Where(s => s.StudentId == id)
-            .OrderByDescending(s => s.GeneratedAt)
-            .Select(s => new BrowsingSummaryReportDto(s.Id, s.SummaryText, s.GeneratedAt))
-            .ToListAsync();
+        var browsingSummaries = canViewRecords
+            ? await db.BrowsingHistorySummaries
+                .Where(s => s.StudentId == id)
+                .OrderByDescending(s => s.GeneratedAt)
+                .Select(s => new BrowsingSummaryReportDto(s.Id, s.SummaryText, s.GeneratedAt))
+                .ToListAsync()
+            : [];
 
-        var suspiciousFlags = await db.SuspiciousFlags
-            .Where(f => f.StudentId == id)
-            .OrderByDescending(f => f.FlaggedAt)
-            .Select(f => new SuspiciousFlagReportDto(f.Id, f.ConfidenceScore, f.FlaggedAt, f.AssignmentId, f.ClassSessionId))
-            .ToListAsync();
+        var suspiciousFlags = canViewRecords
+            ? await db.SuspiciousFlags
+                .Where(f => f.StudentId == id)
+                .OrderByDescending(f => f.FlaggedAt)
+                .Select(f => new SuspiciousFlagReportDto(f.Id, f.ConfidenceScore, f.FlaggedAt, f.AssignmentId, f.ClassSessionId))
+                .ToListAsync()
+            : [];
+
+        // AWA-08: same PublishedMarksQueries helper MarksController's Mine() (SDA-15) and
+        // Ward() (PRT-02) call — one query per mark type, shared by every "view a
+        // student's marks" surface, so none of the three can drift on the publish rule.
+        var internalMarks = canViewPerformance
+            ? await PublishedMarksQueries.GetPublishedInternalMarksAsync(db, id)
+            : [];
+        var externalMarks = canViewPerformance
+            ? await PublishedMarksQueries.GetPublishedExternalMarksAsync(db, id)
+            : [];
 
         return Ok(new StudentRecordDto(
             user.Id,
@@ -115,14 +145,16 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             user.IsActive,
             remarks,
             browsingSummaries,
-            suspiciousFlags));
+            suspiciousFlags,
+            internalMarks,
+            externalMarks));
     }
 
     // AWA-10. Same reasoning as Create above: gated on reset_password so that adding
     // [Authorize] to this controller (for AWA-07) doesn't leave this reachable — and
     // able to take over any account — for any authenticated caller regardless of role.
     [HttpPost("{id}/reset-password")]
-    public async Task<IActionResult> ResetPassword(Guid id, [FromBody] string newPassword)
+    public async Task<IActionResult> ResetPassword(Guid id, [FromBody] ResetPasswordRequest request)
     {
         var caller = await CurrentUserAsync();
         if (caller is null)
@@ -140,7 +172,7 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return NotFound();
         }
 
-        user.PasswordHash = passwordHasher.Hash(newPassword);
+        user.PasswordHash = passwordHasher.Hash(request.NewPassword);
         await db.SaveChangesAsync();
         return NoContent();
     }

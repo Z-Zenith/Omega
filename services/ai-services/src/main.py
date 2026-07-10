@@ -51,6 +51,14 @@ class SimilarityRequest(BaseModel):
         description="Cosine similarity threshold (default 0.90 / 90%)"
     )
 
+    @field_validator("threshold", mode="before")
+    @classmethod
+    def default_threshold_if_none(cls, v):
+        # An explicit `"threshold": null` means "no override" — fall back to the
+        # documented default rather than letting None flow into the similarity
+        # engine, where `score >= None` raises a TypeError (see #89).
+        return 0.90 if v is None else v
+
 class SimilarityMatchSchema(BaseModel):
     submission_a_id: str
     submission_b_id: str
@@ -112,6 +120,13 @@ class SuspiciousBehaviourRequest(BaseModel):
         le=1.0,
         description="Minimum combined confidence score required to surface a flag (default 0.70)"
     )
+
+    @field_validator("min_confidence", mode="before")
+    @classmethod
+    def default_min_confidence_if_none(cls, v):
+        # Same rationale as SimilarityRequest.default_threshold_if_none — an explicit
+        # `null` means "no override," not "compare against None" (see #89).
+        return 0.70 if v is None else v
 
 class SuspiciousFlagSchema(BaseModel):
     student_id: str
