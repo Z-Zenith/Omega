@@ -347,6 +347,13 @@ export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
 }
 
+// AWA-06 — institution-wide group visibility. Backend: CommunityController.AllGroups
+// (already on main), gated by view_all_groups (Lecturer/HoD/Admin by default). Reuses
+// the GroupDto declared above for AWA-12's createGroup.
+export function listAllGroups() {
+  return request<{ groups: GroupDto[] }>('/groups')
+}
+
 // AWA-04 — fee payment links. Backend: FeesController.CreateLink (already on main),
 // gated by the manage_fees permission (Finance/Admin by default — services/authz/model.fga).
 export interface FeeLinkResponse {
