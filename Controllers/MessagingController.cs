@@ -63,7 +63,24 @@ public class MessagingController(AppDbContext db) : ControllerBase
             CreatedAt = DateTime.UtcNow,
         };
         db.MessageThreads.Add(thread);
-        await db.SaveChangesAsync();
+
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // #159: two concurrent CreateThread calls for the same (student, teacher) pair
+            // can both pass the "no existing thread" check above before either commits — the
+            // losing request hits message_threads' unique (student_id, teacher_id) index as
+            // an otherwise-uncaught DbUpdateException. Same recovery pattern as
+            // BrowsingController.ApproveWhitelistRequest: drop our speculative insert and
+            // return the thread the other request actually persisted.
+            db.Entry(thread).State = EntityState.Detached;
+            thread = await db.MessageThreads
+                .SingleAsync(t => t.StudentId == request.StudentId && t.TeacherId == request.TeacherId);
+            return Ok(ToResponse(thread));
+        }
 
         return CreatedAtAction(nameof(ListMessages), new { id = thread.Id }, ToResponse(thread));
     }
