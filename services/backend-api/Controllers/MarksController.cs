@@ -11,7 +11,7 @@ namespace BackendApi.Controllers;
 
 [ApiController]
 [Route("api/v1/marks")]
-public class MarksController(AppDbContext db, IPermissionService permissions) : ControllerBase
+public class MarksController(AppDbContext db, IPermissionService permissions, ICollegeScopeService collegeScope) : ControllerBase
 {
     private const string AddExternalMarksPermission = "add_external_marks";
 
@@ -159,10 +159,20 @@ public class MarksController(AppDbContext db, IPermissionService permissions) : 
             return BadRequest(new { error = "unknown_student", message = "No student exists with that id." });
         }
 
-        var subject = await db.Subjects.FindAsync(request.SubjectId);
+        var subject = await db.Subjects.Include(s => s.Department).FirstOrDefaultAsync(s => s.Id == request.SubjectId);
         if (subject is null)
         {
             return BadRequest(new { error = "unknown_subject", message = "No subject exists with that id." });
+        }
+
+        // #129: add_external_marks has no DepartmentId/CollegeId column on PermissionGrant
+        // at all (contradicts model.fga's department-scoped add_external_marks_grant), and
+        // this endpoint previously only checked the student/subject existed, not that they
+        // belong to the grant holder's own college. Clamp both to the caller's college.
+        var callerCollegeId = await collegeScope.GetCollegeIdAsync(userId);
+        if (student.CollegeId != callerCollegeId || subject.Department.CollegeId != callerCollegeId)
+        {
+            return Forbid();
         }
 
         var externalMark = new ExternalMark
@@ -310,15 +320,8 @@ public class MarksController(AppDbContext db, IPermissionService permissions) : 
     {
         var studentId = CurrentUserId();
 
-        var internalMarks = await db.InternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new InternalMarkDto(m.SubjectId, m.Subject.Name, m.Marks, m.PublishedAt))
-            .ToListAsync();
-
-        var externalMarks = await db.ExternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new ExternalMarkDto(m.SubjectId, m.Subject.Name, m.Grade, m.ApprovedAt))
-            .ToListAsync();
+        var internalMarks = await PublishedMarksQueries.GetPublishedInternalMarksAsync(db, studentId);
+        var externalMarks = await PublishedMarksQueries.GetPublishedExternalMarksAsync(db, studentId);
 
         return Ok(new MyMarksResponse(internalMarks, externalMarks));
     }
@@ -345,15 +348,8 @@ public class MarksController(AppDbContext db, IPermissionService permissions) : 
                 a.Status.ToString()))
             .ToListAsync();
 
-        var internalMarks = await db.InternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new InternalMarkDto(m.SubjectId, m.Subject.Name, m.Marks, m.PublishedAt))
-            .ToListAsync();
-
-        var externalMarks = await db.ExternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new ExternalMarkDto(m.SubjectId, m.Subject.Name, m.Grade, m.ApprovedAt))
-            .ToListAsync();
+        var internalMarks = await PublishedMarksQueries.GetPublishedInternalMarksAsync(db, studentId);
+        var externalMarks = await PublishedMarksQueries.GetPublishedExternalMarksAsync(db, studentId);
 
         return Ok(new WardRecordResponse(student.Id, student.FullName, attendance, internalMarks, externalMarks));
     }

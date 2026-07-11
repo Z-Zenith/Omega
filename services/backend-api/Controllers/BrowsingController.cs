@@ -172,15 +172,6 @@ public class BrowsingController(AppDbContext db) : ControllerBase
             new WhitelistSiteDto(site!.Id, site.Url, site.ApprovedAt)));
     }
 
-    [HttpGet("students/{id}/browsing-summary")]
-    public IActionResult BrowsingSummary(Guid id) => StatusCode(501, new { feature = "AIS-01", status = "not_implemented" });
-
-    [HttpPost("telemetry")]
-    public IActionResult PostTelemetry() => StatusCode(501, new { feature = "SDA-25", status = "not_implemented" });
-
-    [HttpGet("suspicious-flags")]
-    public IActionResult SuspiciousFlags() => StatusCode(501, new { feature = "AIS-07", status = "not_implemented" });
-
     private static WhitelistRequestDto ToDto(WhitelistRequest r) =>
         new(r.Id, r.Url, r.RequestedBy, r.Status.ToString(), r.ReviewedBy);
 
