@@ -16,6 +16,11 @@ public partial class College
     [Column("name")]
     public string Name { get; set; } = null!;
 
+    // IANA time zone name (e.g. "Asia/Kolkata"). Used to derive session/due dates from this
+    // college's local time rather than raw UTC (#152) - see Services/CollegeClock.cs.
+    [Column("time_zone")]
+    public string TimeZone { get; set; } = "UTC";
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
 

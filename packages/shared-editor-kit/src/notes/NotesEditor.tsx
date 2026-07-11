@@ -22,7 +22,7 @@ import type {
   NotesEditorProps,
   OutgoingLinks,
 } from './types.js';
-import { extractOutgoingLinks } from './linkExtraction.js';
+import { extractOutgoingLinks, uniqueLinkTargetsKey } from './linkExtraction.js';
 
 type LinkStatus = 'pending' | 'resolved' | 'not_found';
 
@@ -53,6 +53,13 @@ export const NotesEditor = forwardRef<NotesEditorApi, NotesEditorProps>(
       () => extractOutgoingLinks(content),
       [content]
     );
+
+    // #161 — extractOutgoingLinks(content) produces a new array reference on every
+    // keystroke even when the set of link targets hasn't actually changed, and the
+    // resolution effect below depends on outgoingLinks by reference. Deriving a stable
+    // key from the unique target ids lets that effect skip re-running (and re-hitting
+    // onResolveLink for every link) on keystrokes that don't add/remove a link target.
+    const linkTargetsKey = useMemo(() => uniqueLinkTargetsKey(outgoingLinks), [outgoingLinks]);
 
     const loadNote = async (noteId: string | null) => {
       setError(null);
@@ -116,7 +123,7 @@ export const NotesEditor = forwardRef<NotesEditorApi, NotesEditorProps>(
         cancelled = true;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [outgoingLinks]);
+    }, [linkTargetsKey]);
 
     useImperativeHandle(
       ref,

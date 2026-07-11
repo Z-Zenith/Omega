@@ -18,6 +18,21 @@ class ApiError extends Error {
   }
 }
 
+// #158 — every backend controller returns {"error": "...", "message": "human text"} on
+// failure; surface that human message instead of the raw JSON blob, falling back to the
+// raw text/status if the body isn't the shape we expect (or isn't JSON at all).
+async function readErrorMessage(res: Response): Promise<string> {
+  const body = await res.text().catch(() => '')
+  if (!body) return res.statusText
+  try {
+    const parsed = JSON.parse(body)
+    if (typeof parsed?.message === 'string' && parsed.message) return parsed.message
+  } catch {
+    // not JSON - fall through to the raw text below
+  }
+  return body
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
   const res = await fetch(`/api/v1${path}`, {
@@ -29,8 +44,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     },
   })
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new ApiError(res.status, body || res.statusText)
+    throw new ApiError(res.status, await readErrorMessage(res))
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -173,7 +187,7 @@ export function getUserProfile(id: string) {
 export function resetUserPassword(id: string, newPassword: string) {
   return request<void>(`/users/${id}/reset-password`, {
     method: 'POST',
-    body: JSON.stringify(newPassword),
+    body: JSON.stringify({ newPassword }),
   })
 }
 
