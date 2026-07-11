@@ -6,6 +6,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using OtpNet;
 
@@ -27,8 +28,8 @@ public class AuthControllerTests
 
     private static string CurrentTotpCode(string secret) => new Totp(Base32Encoding.ToBytes(secret)).ComputeTotp();
 
-    private static AuthController ControllerAs(AppDbContext db, Guid userId) =>
-        new(db, new BcryptPasswordHasher(), new TotpService(), new ThrowingJwtTokenService())
+    private static AuthController ControllerAs(AppDbContext db, Guid userId, ITotpService totpService) =>
+        new(db, new BcryptPasswordHasher(), totpService, new ThrowingJwtTokenService())
         {
             ControllerContext = new ControllerContext
             {
@@ -45,14 +46,19 @@ public class AuthControllerTests
     {
         await using var db = NewDb();
         var hasher = new BcryptPasswordHasher();
-        var totpSecret = new TotpService().GenerateSecret();
+        // Same TotpService instance (and thus the same ephemeral key) used to both Protect()
+        // the stored secret and, via the controller, ValidateCode() it back - two separate
+        // instances would each get their own ephemeral key and could never decrypt each other's
+        // ciphertext.
+        var totpService = new TotpService(new EphemeralDataProtectionProvider());
+        var totpSecret = totpService.GenerateSecret();
         var user = new User
         {
             Id = Guid.NewGuid(),
             CollegeId = Guid.NewGuid(),
             Identifier = $"user-{Guid.NewGuid():N}",
             PasswordHash = hasher.Hash("old-password"),
-            TotpSecret = totpSecret,
+            TotpSecret = totpService.Protect(totpSecret),
             FullName = "Test User",
             AccountType = AccountType.Teacher,
             IsActive = true,
@@ -65,7 +71,7 @@ public class AuthControllerTests
         db.UserSessions.AddRange(sessionA, sessionB, otherUserSession);
         await db.SaveChangesAsync();
 
-        var controller = ControllerAs(db, user.Id);
+        var controller = ControllerAs(db, user.Id, totpService);
         var result = await controller.ChangePassword(new ChangePasswordRequest("old-password", "new-password", CurrentTotpCode(totpSecret)));
 
         Assert.IsType<NoContentResult>(result);
@@ -82,14 +88,15 @@ public class AuthControllerTests
     {
         await using var db = NewDb();
         var hasher = new BcryptPasswordHasher();
-        var totpSecret = new TotpService().GenerateSecret();
+        var totpService = new TotpService(new EphemeralDataProtectionProvider());
+        var totpSecret = totpService.GenerateSecret();
         var user = new User
         {
             Id = Guid.NewGuid(),
             CollegeId = Guid.NewGuid(),
             Identifier = $"user-{Guid.NewGuid():N}",
             PasswordHash = hasher.Hash("old-password"),
-            TotpSecret = totpSecret,
+            TotpSecret = totpService.Protect(totpSecret),
             FullName = "Test User",
             AccountType = AccountType.Teacher,
             IsActive = true,
@@ -99,7 +106,7 @@ public class AuthControllerTests
         db.UserSessions.Add(session);
         await db.SaveChangesAsync();
 
-        var controller = ControllerAs(db, user.Id);
+        var controller = ControllerAs(db, user.Id, totpService);
         var result = await controller.ChangePassword(new ChangePasswordRequest("wrong-password", "new-password", CurrentTotpCode(totpSecret)));
 
         Assert.IsType<UnauthorizedObjectResult>(result);

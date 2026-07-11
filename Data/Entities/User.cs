@@ -181,13 +181,13 @@ public partial class User
     [InverseProperty("Student")]
     public virtual ICollection<UsageTelemetry> UsageTelemetries { get; set; } = new List<UsageTelemetry>();
 
-    // #130/#132 — a user accumulates many historical UserSession rows over time (one per
-    // login); only one may be IsActive=true at once (enforced by the partial unique index
-    // uniq_user_active_session, not a full one). This was previously scaffolded/configured as
-    // a singular one-to-one navigation, which doesn't match that reality: EF's change tracker
-    // (especially the InMemory test provider) then treats a second tracked UserSession for the
-    // same user as replacing the first instead of coexisting alongside it, silently losing the
-    // older row. Fixed to the one-to-many shape the schema actually has.
+    // #92 — DB only enforces uniqueness on user_id where is_active = true (a partial unique
+    // index, see uniq_user_active_session in db/init/01_schema.sql); a new login flips the
+    // previous row to is_active=false instead of deleting it, so multiple historical rows
+    // accumulate per user. Modeled as a collection (not a one-to-one nav) so EF can't return
+    // an arbitrary row — callers must explicitly filter .Where(s => s.IsActive) to get the
+    // current session. Also load-bearing for #130/#132's session-revocation work, which
+    // relies on iterating every active session for a user.
     [InverseProperty("User")]
     public virtual ICollection<UserSession> UserSessions { get; set; } = new List<UserSession>();
 
