@@ -12,7 +12,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class TimetableController(AppDbContext db, IPermissionService permissions, INotificationRouter notifications) : ControllerBase
+public class TimetableController(AppDbContext db, IPermissionService permissions, INotificationRouter notifications, ILogger<TimetableController> logger) : ControllerBase
 {
     // 5 weekdays x 6 one-hour periods starting 9am. MVP scheduling heuristic, not a
     // constraint solver — enough to satisfy AWA-01/AWA-02's stated acceptance criteria.
@@ -89,6 +89,14 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
             .Select(s => (s.TeacherId, s.DayOfWeek, s.StartTime))
             .ToHashSet();
 
+        // #159: the (Section, Subject) dedup key above is intentionally missing TeacherId
+        // (see the comment on manuallyCoveredAssignments), which means a stale/duplicate
+        // TeacherSectionAssignment row for the same (section, subject) can get silently
+        // treated as "already covered" and never scheduled, with no error surfaced anywhere.
+        // Without changing the dedup key itself, at least surface which assignments were
+        // skipped for this reason so it's visible instead of silent.
+        var skippedAsAlreadyCovered = new List<TeacherSectionAssignment>();
+
         var newSlots = new List<TimetableSlot>();
         foreach (var assignment in assignments)
         {
@@ -98,6 +106,7 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
             }
             if (manuallyCoveredAssignments.Contains((assignment.SectionId, assignment.SubjectId)))
             {
+                skippedAsAlreadyCovered.Add(assignment);
                 continue;
             }
 
@@ -133,6 +142,16 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
             newSlots.Add(slot);
             occupiedCells.Add((slot.SectionId, slot.DayOfWeek, slot.StartTime));
             teacherBusy.Add((slot.TeacherId, slot.DayOfWeek, slot.StartTime));
+        }
+
+        if (skippedAsAlreadyCovered.Count > 0)
+        {
+            foreach (var skipped in skippedAsAlreadyCovered)
+            {
+                logger.LogWarning(
+                    "TimetableController.Generate: TeacherSectionAssignment {AssignmentId} (Teacher {TeacherId}, Section {SectionId}, Subject {SubjectId}) was skipped as already covered by a manually-edited slot for that (Section, Subject) pair.",
+                    skipped.Id, skipped.TeacherId, skipped.SectionId, skipped.SubjectId);
+            }
         }
 
         db.TimetableSlots.AddRange(newSlots);
