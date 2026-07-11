@@ -46,6 +46,8 @@ builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
 builder.Services.AddSignalR();
 // SDA-13
 builder.Services.AddHostedService<NoLoginAlertHostedService>();
+// AWA-05
+builder.Services.AddHostedService<FeeReminderHostedService>();
 
 // SDA-25: AI Services (Track-2-owned) receives usage telemetry for suspicious-behaviour
 // analysis. Defaults to the docker-compose service name/port if not overridden.

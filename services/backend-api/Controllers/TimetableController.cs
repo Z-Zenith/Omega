@@ -219,6 +219,27 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         db.TimetableChangeRequests.Add(changeRequest);
         await db.SaveChangesAsync();
 
+        // Notification Router (shared) — TWA-13's AC is "Request shows as pending until Admin
+        // approves/rejects it"; routing this means Admin finds out a request exists without
+        // polling. Fanned out to every Admin in the requesting teacher's own college, same
+        // scoping rule as TWA-11's report routing (see AdminRecipients).
+        var teacher = await db.Users.FindAsync(userId);
+        if (teacher is not null)
+        {
+            var adminIds = await AdminRecipients.GetCollegeAdminIdsAsync(db, teacher.CollegeId);
+            foreach (var adminId in adminIds)
+            {
+                await notifications.RouteAsync(adminId, NotificationType.TimetableRequest, new
+                {
+                    changeRequestId = changeRequest.Id,
+                    teacherId = userId,
+                    teacherName = teacher.FullName,
+                    description = changeRequest.Description,
+                    requestedAt = changeRequest.RequestedAt,
+                });
+            }
+        }
+
         return Ok(new ChangeRequestDto(changeRequest.Id, changeRequest.Description, changeRequest.Status, changeRequest.RequestedAt));
     }
 

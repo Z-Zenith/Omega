@@ -2,6 +2,7 @@ using System.Security.Claims;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using BackendApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +17,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1/reports")]
 [Authorize]
-public class ReportsController(AppDbContext db) : ControllerBase
+public class ReportsController(AppDbContext db, INotificationRouter notifications) : ControllerBase
 {
     private static readonly string[] TeacherRoleCodes = ["lecturer", "hod"];
 
@@ -56,6 +57,28 @@ public class ReportsController(AppDbContext db) : ControllerBase
             .Include(r => r.Section)
             .Include(r => r.Student)
             .FirstAsync(r => r.Id == report.Id);
+
+        // Notification Router (shared) — TWA-11's own AC is "Admin's inbox shows the report",
+        // which List() below already satisfies by itself; routing a notification on top just
+        // means Admin doesn't have to poll that inbox to find out a new report landed. Fanned
+        // out to every Admin in the reporting teacher's own college (not institution-wide) —
+        // see AdminRecipients for why role_bindings needs a join to scope that.
+        var adminIds = await AdminRecipients.GetCollegeAdminIdsAsync(db, saved.Teacher.CollegeId);
+        foreach (var adminId in adminIds)
+        {
+            await notifications.RouteAsync(adminId, NotificationType.Report, new
+            {
+                reportId = report.Id,
+                teacherId = report.TeacherId,
+                teacherName = saved.Teacher.FullName,
+                sectionId = report.SectionId,
+                sectionName = saved.Section?.Name,
+                studentId = report.StudentId,
+                studentName = saved.Student?.FullName,
+                submittedAt = report.SubmittedAt,
+            });
+        }
+
         return Ok(ToDto(saved));
     }
 
