@@ -48,9 +48,18 @@ public class SubjectsController(AppDbContext db) : ControllerBase
                 AssignmentTeacherId = a.TeacherId,
                 AssignmentTeacherName = a.Teacher.FullName,
             })
-            .Distinct()
             .ToListAsync();
 
+        // #159: Distinct() used to run on this anonymous projection, which still carries
+        // AssignmentTeacherId/AssignmentTeacherName per TeacherSectionAssignment row — two
+        // sections that both teach the same subject via different assignment-level teachers
+        // produced two "distinct" rows that only collapse to the same teacher after the
+        // SubjectTeacherId ?? AssignmentTeacherId fallback below. Apply Distinct() to the
+        // final MySubjectDto shape instead (it's a record, so this is structural equality):
+        // that collapses true duplicates — same subject, same final teacher after the
+        // fallback — while still keeping legitimate co-teaching entries (same subject,
+        // different final teacher, e.g. Subject.TeacherId unset with two
+        // TeacherSectionAssignment rows for different teachers) separate.
         var subjects = assignments
             .Select(a => new MySubjectDto(
                 a.SubjectId,
@@ -58,6 +67,7 @@ public class SubjectsController(AppDbContext db) : ControllerBase
                 a.Name,
                 a.SubjectTeacherId ?? a.AssignmentTeacherId,
                 a.SubjectTeacherName ?? a.AssignmentTeacherName))
+            .Distinct()
             .ToList();
 
         return Ok(subjects);
