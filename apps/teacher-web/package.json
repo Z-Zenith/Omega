@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@campus/api-client": "file:../../packages/api-client",
     "@campus/direct-messaging": "file:../../packages/direct-messaging",
     "@campus/shared-editor-kit": "file:../../packages/shared-editor-kit",
     "@tanstack/react-query": "^5.101.2",
