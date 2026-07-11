@@ -114,6 +114,54 @@ public class NoLoginAlertScannerTests
         Assert.Empty(router.Sent);
     }
 
+    // #159: a student who logged in the evening before and never logged out (session still
+    // IsActive) must not be treated as "never logged in" just because that session's
+    // CreatedAt predates the class start.
+    [Fact]
+    public async Task DoesNotAlert_WhenPriorSessionStillActiveFromBeforeClassStart()
+    {
+        await using var db = NewDb();
+        var sessionStart = new DateTime(2026, 7, 6, 9, 0, 0, DateTimeKind.Utc);
+        var fixture = await SeedPresentButNotLoggedInAsync(db, sessionStart);
+        db.UserSessions.Add(new UserSession
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.StudentId,
+            IsActive = true,
+            CreatedAt = sessionStart.AddHours(-12),
+        });
+        await db.SaveChangesAsync();
+        var router = new FakeNotificationRouter();
+
+        await NoLoginAlertScanner.ScanAsync(db, router, sessionStart.AddMinutes(21));
+
+        Assert.Empty(router.Sent);
+    }
+
+    // #159: the converse — a session from before class start that was already logged out
+    // (IsActive == false) is not a current login and must not suppress the alert.
+    [Fact]
+    public async Task StillAlerts_WhenPriorSessionEndedBeforeClassStart()
+    {
+        await using var db = NewDb();
+        var sessionStart = new DateTime(2026, 7, 6, 9, 0, 0, DateTimeKind.Utc);
+        var fixture = await SeedPresentButNotLoggedInAsync(db, sessionStart);
+        db.UserSessions.Add(new UserSession
+        {
+            Id = Guid.NewGuid(),
+            UserId = fixture.StudentId,
+            IsActive = false,
+            CreatedAt = sessionStart.AddHours(-12),
+        });
+        await db.SaveChangesAsync();
+        var router = new FakeNotificationRouter();
+
+        await NoLoginAlertScanner.ScanAsync(db, router, sessionStart.AddMinutes(21));
+
+        var sent = Assert.Single(router.Sent);
+        Assert.Equal(fixture.TeacherId, sent.RecipientId);
+    }
+
     [Fact]
     public async Task FiresOnlyOncePerSession_AcrossRepeatedScans()
     {
