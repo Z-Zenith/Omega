@@ -30,6 +30,13 @@ public class CalendarController(AppDbContext db, IPermissionService permissions)
             return Unauthorized();
         }
 
+        // #159: nothing previously rejected EndTime <= StartTime — a zero-or-negative-length
+        // event silently persisted and would render nonsensically on any calendar view.
+        if (request.EndTime <= request.StartTime)
+        {
+            return BadRequest(new { error = "invalid_time_range", message = "EndTime must be after StartTime." });
+        }
+
         var newEvent = new Event
         {
             Id = Guid.NewGuid(),
@@ -90,7 +97,20 @@ public class CalendarController(AppDbContext db, IPermissionService permissions)
 
         var registration = new EventRegistration { Id = Guid.NewGuid(), EventId = id, StudentId = student.Id };
         db.EventRegistrations.Add(registration);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // #94: two concurrent registration requests for the same (event, student) can both
+            // pass the existence check above before either commits — the losing request hits
+            // the unique constraint on (event_id, student_id) instead of a clean response.
+            // Mirrors BrowsingController.ApproveWhitelistRequest's identical race: drop the
+            // speculative insert and return the row the other request actually persisted.
+            db.Entry(registration).State = EntityState.Detached;
+            registration = await db.EventRegistrations.SingleAsync(r => r.EventId == id && r.StudentId == student.Id);
+        }
 
         return Ok(new RegisterForEventResponse(registration.EventId, registration.StudentId, registration.RegisteredAt));
     }
@@ -120,9 +140,14 @@ public class CalendarController(AppDbContext db, IPermissionService permissions)
                 registeredEventIds.Contains(e.Id) ? "registered=true" : null)));
         }
 
-        var todos = await db.Todos.Where(t => t.StudentId == student.Id).ToListAsync();
+        // #159: an undated todo used to default to DateTime.MinValue (0001-01-01), which
+        // rendered as a ~2000-years-overdue item and broke any upcoming/overdue grouping on
+        // the client. Omit undated todos from the dated calendar entirely rather than giving
+        // them a fabricated date — there's no separate "undated" bucket in CalendarItemDto
+        // (adding one is a contract change), so skipping is the safe fix here.
+        var todos = await db.Todos.Where(t => t.StudentId == student.Id && t.DueDate != null).ToListAsync();
         items.AddRange(todos.Select(t => new CalendarItemDto(
-            "todo", t.Id, t.Title, t.DueDate ?? DateTime.MinValue, t.DueDate ?? DateTime.MinValue,
+            "todo", t.Id, t.Title, t.DueDate!.Value, t.DueDate!.Value,
             t.Completed ? "completed=true" : null)));
 
         var customEntries = await db.CustomCalendarEntries.Where(c => c.StudentId == student.Id).ToListAsync();

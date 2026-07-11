@@ -31,7 +31,7 @@ public class RolesControllerTests
         IsActive = true,
     };
 
-    private static RolesController ControllerAs(AppDbContext db, Guid userId) => new(db, new PermissionService(db))
+    private static RolesController ControllerAs(AppDbContext db, Guid userId) => new(db, new PermissionService(db), new CollegeScopeService(db))
     {
         ControllerContext = new ControllerContext
         {
@@ -80,6 +80,7 @@ public class RolesControllerTests
         await SeedRolesAndPermissionsAsync(db);
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
         db.Users.AddRange(admin, target);
         db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
@@ -94,6 +95,26 @@ public class RolesControllerTests
         Assert.Single(db.RoleBindings.Local, b => b.UserId == target.Id);
     }
 
+    // #127 — cross-college privilege escalation: an admin at one college must not be able
+    // to grant a role to a user at a different college.
+    [Fact]
+    public async Task CreateRoleBinding_ForbidsCrossCollegeTarget()
+    {
+        await using var db = NewDb();
+        await SeedRolesAndPermissionsAsync(db);
+        var admin = NewUser();
+        var target = NewUser(); // different (random) CollegeId than admin, by construction
+        db.Users.AddRange(admin, target);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.CreateRoleBinding(new CreateRoleBindingRequest(target.Id, "lecturer", ScopeKind.Global, null));
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.DoesNotContain(db.RoleBindings.Local, b => b.UserId == target.Id);
+    }
+
     // AWA-13
     [Fact]
     public async Task DeletePermissionGrant_RevokedOverrideStopsApplyingImmediately()
@@ -102,6 +123,7 @@ public class RolesControllerTests
         await SeedRolesAndPermissionsAsync(db);
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
         db.Users.AddRange(admin, target);
         db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
@@ -131,6 +153,7 @@ public class RolesControllerTests
         await SeedRolesAndPermissionsAsync(db);
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
         db.Users.AddRange(admin, target);
         db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
