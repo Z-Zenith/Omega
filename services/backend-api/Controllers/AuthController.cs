@@ -26,10 +26,27 @@ public class AuthController(
     [EnableRateLimiting(RateLimiterPolicies.Auth)]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
     {
-        var user = await db.Users
+        // Identifier is only unique per (college_id, identifier) - see users_college_id_identifier_key
+        // - not globally, so a roll number/username can legitimately collide across colleges
+        // (#151). Fail closed on ambiguity rather than deterministically picking one match
+        // (e.g. oldest by CreatedAt): silently authenticating against the wrong college's
+        // account would fail the password check against the wrong hash and permanently lock
+        // that user out with a misleading "invalid password" error. Mirrors the same
+        // fail-closed pattern already used in ParentController.Login.
+        var matchingUsers = await db.Users
             .Where(u => u.Identifier == request.Identifier)
-            .OrderBy(u => u.CreatedAt)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
+
+        if (matchingUsers.Count > 1)
+        {
+            return Unauthorized(new
+            {
+                error = "identifier_ambiguous",
+                message = "This roll number/username exists at more than one institution. Contact your institution's admin to resolve this.",
+            });
+        }
+
+        var user = matchingUsers.SingleOrDefault();
 
         if (user is null)
         {
