@@ -328,6 +328,28 @@ public class TimetableControllerTests
         }
     }
 
+    // #152 — when SessionDate is omitted, the session date must be derived from the
+    // teacher's college's local time zone (via CollegeClock), not raw UTC, so marking
+    // attendance near local midnight doesn't roll over to the wrong calendar day.
+    [Fact]
+    public async Task Twa08_MarkAttendance_DefaultsSessionDateFromCollegeTimeZone_NotRawUtc()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var college = new College { Id = teacher.CollegeId, Name = "Kiritimati Campus", TimeZone = "Pacific/Kiritimati" };
+        db.Colleges.Add(college);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+
+        var controller = ControllerAs(db, teacher);
+        var entries = new List<AttendanceEntryRequest> { new(fixture.Students[0].Id, "Present") };
+        var result = await controller.MarkAttendance(new MarkAttendanceRequest(fixture.Slot.Id, null, entries));
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var session = await db.ClassSessions.SingleAsync(s => s.TimetableSlotId == fixture.Slot.Id);
+        var expectedDate = CollegeClock.LocalDate(college, DateTime.UtcNow);
+        Assert.Equal(expectedDate, session.SessionDate);
+    }
+
     // TWA-08
     [Fact]
     public async Task Twa08_Roster_ReturnsEnrolledStudentsForOwnSlot()

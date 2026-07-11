@@ -14,10 +14,6 @@ import {
 
 const STATUS_OPTIONS: AttendanceStatus[] = ['Present', 'Absent', 'Late']
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
 // JS getDay(): 0=Sunday..6=Saturday. Backend's timetable grid runs Monday(1)..Friday(5).
 function todayDayOfWeek(): number {
   const day = new Date().getDay()
@@ -67,11 +63,13 @@ export function AttendancePage() {
   }, [roster.data])
 
   const markMutation = useMutation({
+    // Session date is left for the backend to derive from the college's local time zone
+    // (#152) rather than computed client-side, which was UTC-based (Date.toISOString())
+    // and could roll over to the wrong calendar day near local midnight.
     mutationFn: () =>
       markAttendance(
         selectedSlotId!,
         Object.entries(statuses).map(([studentId, status]) => ({ studentId, status })),
-        todayIso(),
       ),
     onSuccess: (response) => setMessage(`Attendance saved for ${response.records.length} student(s).`),
     onError: (err) =>
