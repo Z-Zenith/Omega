@@ -37,6 +37,14 @@ jobs:
         run: npm ci
         working-directory: packages/direct-messaging
 
+      # All three apps consume packages/api-client via a `file:` dependency
+      # (issue #87). Same reasoning as direct-messaging above: npm doesn't
+      # install a file-linked package's own devDependencies, so install them
+      # explicitly for every app in this matrix.
+      - name: Install shared package dependencies (api-client)
+        run: npm ci
+        working-directory: packages/api-client
+
       - name: Lint
         run: npm run lint
 
