@@ -1,14 +1,12 @@
-const TOKEN_KEY = 'campus.token'
+// Only the core HTTP client (token storage, fetch wrapper, error type) is
+// genuinely shared with apps/teacher-web and apps/admin-web — see
+// packages/api-client (issue #87). PRT's auth flow (ward login, not staff
+// login) and everything below are Parent-Portal-specific and stay local.
+export { getToken, setToken, ApiError } from '@campus/api-client'
+
+import { request } from '@campus/api-client'
+
 const WARD_KEY = 'campus.ward'
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
-}
-
-export function setToken(token: string | null) {
-  if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
-}
 
 export interface StoredWard {
   wardStudentId: string
@@ -28,33 +26,6 @@ export function getStoredWard(): StoredWard | null {
 export function setStoredWard(ward: StoredWard | null) {
   if (ward) localStorage.setItem(WARD_KEY, JSON.stringify(ward))
   else localStorage.removeItem(WARD_KEY)
-}
-
-export class ApiError extends Error {
-  status: number
-
-  constructor(status: number, message: string) {
-    super(message)
-    this.status = status
-  }
-}
-
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken()
-  const res = await fetch(`/api/v1${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new ApiError(res.status, body || res.statusText)
-  }
-  if (res.status === 204) return undefined as T
-  return res.json() as Promise<T>
 }
 
 export interface ParentLoginResponse {
