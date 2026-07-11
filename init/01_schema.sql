@@ -55,6 +55,10 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE TABLE IF NOT EXISTS colleges (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name        text NOT NULL,
+    -- IANA time zone name (e.g. 'Asia/Kolkata'), used to derive "today"/session dates from
+    -- this college's local time rather than raw UTC (#152) -- attendance marking and fee
+    -- due-date checks must not roll over to the wrong calendar day near local midnight.
+    time_zone   text NOT NULL DEFAULT 'UTC',
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
