@@ -10,6 +10,23 @@ import {
   type InternalMarksRosterEntry,
 } from '@/lib/api'
 
+// MarksController.CreateInternal (backend) returns BadRequest({ error, message }) for a
+// non-403 failure such as negative marks. #158 tracks teaching api.ts's request() to parse
+// that JSON body into ApiError.message directly instead of the raw response text; until
+// that lands, err.message here is the raw JSON blob, so unwrap it ourselves — this still
+// works unchanged once #158 merges (JSON.parse on an already-plain message just fails and
+// falls through to the plain-string branch below).
+export function backendErrorMessage(err: unknown, fallback: string): string {
+  if (!(err instanceof ApiError)) return fallback
+  try {
+    const parsed = JSON.parse(err.message)
+    if (parsed && typeof parsed.message === 'string' && parsed.message) return parsed.message
+  } catch {
+    // Not JSON — err.message is already the plain message (e.g. once #158 lands).
+  }
+  return err.message || fallback
+}
+
 export function MarksPage() {
   const [subjectId, setSubjectId] = useState('')
   const [assignmentId, setAssignmentId] = useState('')
@@ -51,7 +68,7 @@ export function MarksPage() {
       setMessage(
         err instanceof ApiError && err.status === 403
           ? "You don't have permission to enter marks for this subject/section."
-          : 'Failed to save marks.',
+          : backendErrorMessage(err, 'Failed to save marks.'),
       ),
   })
 
@@ -63,6 +80,13 @@ export function MarksPage() {
     const marks = Number(raw)
     if (raw.trim() === '' || Number.isNaN(marks)) {
       setMessage('Enter a numeric mark before saving.')
+      return
+    }
+    // Mirrors MarksController.CreateInternal's `if (request.Marks < 0) return BadRequest(...)`
+    // (services/backend-api/Controllers/MarksController.cs:30-33) — reject client-side with
+    // the same rule instead of round-tripping to the server just to learn it's invalid.
+    if (marks < 0) {
+      setMessage('Marks must not be negative.')
       return
     }
     marksMutation.mutate({
