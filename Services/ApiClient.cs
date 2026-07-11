@@ -273,8 +273,38 @@ public class ApiClient
         if (!response.IsSuccessStatusCode)
         {
             var body2 = await response.Content.ReadAsStringAsync();
-            throw new ApiException((int)response.StatusCode, string.IsNullOrWhiteSpace(body2) ? response.ReasonPhrase ?? "Request failed" : body2);
+            throw new ApiException((int)response.StatusCode, ExtractErrorMessage(body2, response.ReasonPhrase));
         }
         return response;
+    }
+
+    // #158 — every backend controller returns {"error": "...", "message": "human text"} on
+    // failure; surface that human message instead of the raw JSON blob, falling back to the
+    // raw text/reason phrase if the body isn't the shape expected (or isn't JSON at all).
+    private static string ExtractErrorMessage(string body, string? reasonPhrase)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return reasonPhrase ?? "Request failed";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var messageProp) && messageProp.ValueKind == JsonValueKind.String)
+            {
+                var message = messageProp.GetString();
+                if (!string.IsNullOrEmpty(message))
+                {
+                    return message;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // not JSON - fall through to the raw text below
+        }
+
+        return body;
     }
 }
