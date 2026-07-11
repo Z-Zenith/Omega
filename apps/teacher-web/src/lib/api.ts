@@ -1,3 +1,5 @@
+import { extractOutgoingLinks, type SekError } from '@campus/shared-editor-kit'
+
 const TOKEN_KEY = 'campus.token'
 
 export function getToken(): string | null {
@@ -330,6 +332,95 @@ export function submitInternalMark(mark: {
   })
 }
 
+// TWA-07 — assignment creation. Backend: AssignmentsController.Create (already on main).
+export type AssignmentType = 'Code' | 'Quiz' | 'Essay' | 'FileUpload'
+
+export interface AssignmentDto {
+  id: string
+  subjectId: string
+  title: string
+  description: string | null
+  type: string
+  dueDate: string
+  submissionWindowStart: string
+  submissionWindowEnd: string
+  typeSpecificSettings: string | null
+}
+
+export function createAssignment(assignment: {
+  subjectId: string
+  title: string
+  description: string | null
+  type: AssignmentType
+  dueDate: string
+  submissionWindowStart: string
+  submissionWindowEnd: string
+}) {
+  return request<AssignmentDto>('/assignments', {
+    method: 'POST',
+    body: JSON.stringify(assignment),
+  })
+}
+
+// TWA-06 — material upload. Backend: CommunityController.UploadMaterial (already on main).
+export interface MaterialDto {
+  id: string
+  title: string
+  fileUrl: string
+  subjectId: string | null
+  groupId: string | null
+  uploadedBy: string
+  uploadedAt: string
+}
+
+export function uploadMaterial(material: { title: string; fileUrl: string; subjectId: string | null; groupId: string | null }) {
+  return request<MaterialDto>('/materials', {
+    method: 'POST',
+    body: JSON.stringify(material),
+  })
+}
+
+// TWA-05 — community groups: create a group, list the groups you belong to, and
+// view/post within one. Backend: services/backend-api/Controllers/CommunityController.cs.
+export type GroupType = 'SubjectSection' | 'Club' | 'TeacherOnly'
+
+export interface GroupDto {
+  id: string
+  name: string
+  type: string
+  sectionId: string | null
+}
+
+export interface GroupPostDto {
+  id: string
+  groupId: string
+  authorId: string
+  content: string
+  createdAt: string
+}
+
+export function createGroup(group: { name: string; type: GroupType; sectionId: string | null }) {
+  return request<GroupDto>('/groups', {
+    method: 'POST',
+    body: JSON.stringify(group),
+  })
+}
+
+export function listMyGroups() {
+  return request<{ groups: GroupDto[] }>('/groups/mine')
+}
+
+export function listGroupPosts(groupId: string) {
+  return request<GroupPostDto[]>(`/groups/${groupId}/posts`)
+}
+
+export function createGroupPost(groupId: string, content: string) {
+  return request<GroupPostDto>(`/groups/${groupId}/posts`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  })
+}
+
 // DMS-01 / TWA-18 — thin adapters from the shared Direct Messaging package's
 // embedder callbacks (Result<T, DmsError>) onto this app's fetch client
 // (which throws ApiError). DMS owns no persistence or auth of its own; this
@@ -388,6 +479,110 @@ export async function dmsSendMessage(threadId: string, content: string) {
     return { ok: true as const, value: message }
   } catch (err) {
     return { ok: false as const, error: toDmsError(err) }
+  }
+}
+
+// TWA-14 — thin adapters from the Shared Editor Kit's NotesEditor (SEK-03) embedder
+// callbacks (Result<T, SekError>) onto this app's fetch client. Same /notes/* endpoints
+// SDA-08/SDA-19 already built for the Student Desktop App — Notes storage isn't
+// SDA-specific, ownership is just scoped to whichever user is signed in.
+export interface NoteSummaryDto {
+  id: string
+  title: string
+  updatedAt: string
+}
+
+interface NoteDto {
+  id: string
+  title: string
+  contentMarkdown: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface NoteLinkInput {
+  toNoteId: string
+  anchor: string
+}
+
+function toSekError(err: unknown): SekError {
+  if (err instanceof ApiError) {
+    if (err.status === 404) return { code: 'note_not_found', message: 'Note not found.' }
+    if (err.status === 403) return { code: 'unauthorized', message: "You don't have access to this note." }
+    if (err.status === 400) return { code: 'validation_error', message: err.message || 'Invalid request.' }
+    return { code: 'network_error', message: err.message || 'Something went wrong.' }
+  }
+  return { code: 'network_error', message: 'Could not reach the server.' }
+}
+
+// NoteDto has no ownerId (every note the API returns already belongs to the caller);
+// SEK's Note type requires one, so it's synthesized from the signed-in user here —
+// same approach SDA-19's SekBridge takes on the desktop side.
+function toSekNote(dto: NoteDto, ownerId: string) {
+  return { id: dto.id, ownerId, title: dto.title, contentMarkdown: dto.contentMarkdown, createdAt: dto.createdAt, updatedAt: dto.updatedAt }
+}
+
+export async function notesListMine() {
+  try {
+    return { ok: true as const, value: await request<NoteSummaryDto[]>('/notes/mine') }
+  } catch (err) {
+    return { ok: false as const, error: toSekError(err) }
+  }
+}
+
+export async function notesGet(id: string, ownerId: string) {
+  try {
+    return { ok: true as const, value: toSekNote(await request<NoteDto>(`/notes/${id}`), ownerId) }
+  } catch (err) {
+    return { ok: false as const, error: toSekError(err) }
+  }
+}
+
+// Upsert: SEK-03's NotesEditor always generates a note's Id client-side before its
+// first save and expects one onSave callback, not a create/update split — try PATCH
+// first, fall back to POST (with that Id) only if the note doesn't exist yet.
+export async function notesSave(note: { id: string; ownerId: string; title: string; contentMarkdown: string }) {
+  const links: NoteLinkInput[] = extractOutgoingLinks(note.contentMarkdown).map((link) => ({
+    toNoteId: link.toNoteId,
+    anchor: link.anchor,
+  }))
+  try {
+    const dto = await request<NoteDto>(`/notes/${note.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: note.title, contentMarkdown: note.contentMarkdown, links }),
+    })
+    return { ok: true as const, value: toSekNote(dto, note.ownerId) }
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 404) {
+      return { ok: false as const, error: toSekError(err) }
+    }
+    try {
+      const dto = await request<NoteDto>('/notes', {
+        method: 'POST',
+        body: JSON.stringify({ title: note.title, contentMarkdown: note.contentMarkdown, id: note.id, links }),
+      })
+      return { ok: true as const, value: toSekNote(dto, note.ownerId) }
+    } catch (err2) {
+      return { ok: false as const, error: toSekError(err2) }
+    }
+  }
+}
+
+export async function notesDelete(id: string) {
+  try {
+    await request<void>(`/notes/${id}`, { method: 'DELETE' })
+    return { ok: true as const, value: undefined }
+  } catch (err) {
+    return { ok: false as const, error: toSekError(err) }
+  }
+}
+
+export async function notesBacklinks(id: string, ownerId: string) {
+  try {
+    const dtos = await request<NoteDto[]>(`/notes/${id}/backlinks`)
+    return { ok: true as const, value: dtos.map((dto) => toSekNote(dto, ownerId)) }
+  } catch (err) {
+    return { ok: false as const, error: toSekError(err) }
   }
 }
 

@@ -65,6 +65,23 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         return Ok(ToDto(group));
     }
 
+    // AWA-06: "no group is excluded from Admin's view regardless of who created it" —
+    // institution-wide, not scoped to the caller's own college the way most other
+    // reads are (Lecturer/HoD/Admin all hold view_all_groups; in practice only Admin's
+    // "institution" is meaningfully broader than a teacher's own membership list).
+    [HttpGet("groups")]
+    public async Task<ActionResult<MyGroupsResponse>> AllGroups()
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "view_all_groups"))
+        {
+            return Forbid();
+        }
+
+        var groups = await db.Groups.ToListAsync();
+        return Ok(new MyGroupsResponse(groups.Select(ToDto).ToList()));
+    }
+
     // SDA-16
     [HttpGet("groups/mine")]
     public async Task<ActionResult<MyGroupsResponse>> MyGroups()
@@ -115,6 +132,48 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         await db.SaveChangesAsync();
 
         return Ok(new GroupPostDto(post.Id, post.GroupId, post.AuthorId, post.Content, post.CreatedAt));
+    }
+
+    // TWA-05, SDA-16: "view and post in groups they belong to" requires a way to actually
+    // list what's been posted — CreatePost alone can't satisfy that acceptance criterion.
+    [HttpGet("groups/{id}/posts")]
+    public async Task<ActionResult<List<GroupPostDto>>> ListPosts(Guid id)
+    {
+        var userId = CurrentUserId();
+        var isMember = await db.GroupMembers.AnyAsync(m => m.GroupId == id && m.UserId == userId);
+        if (!isMember)
+        {
+            return Forbid();
+        }
+
+        var posts = await db.GroupPosts
+            .Where(p => p.GroupId == id)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new GroupPostDto(p.Id, p.GroupId, p.AuthorId, p.Content, p.CreatedAt))
+            .ToListAsync();
+
+        return Ok(posts);
+    }
+
+    // SDA-16: "shall surface any material shared in a group inside that group's Materials
+    // section... without a separate upload step" — this is that surface, reading straight
+    // off the same Material rows TWA-06's upload endpoint writes (GroupId set).
+    [HttpGet("groups/{id}/materials")]
+    public async Task<ActionResult<List<MaterialDto>>> ListGroupMaterials(Guid id)
+    {
+        var userId = CurrentUserId();
+        var isMember = await db.GroupMembers.AnyAsync(m => m.GroupId == id && m.UserId == userId);
+        if (!isMember)
+        {
+            return Forbid();
+        }
+
+        var materials = await db.Materials
+            .Where(m => m.GroupId == id)
+            .OrderByDescending(m => m.UploadedAt)
+            .ToListAsync();
+
+        return Ok(materials.Select(ToDto).ToList());
     }
 
     // TWA-06. Gated by AccountType rather than a permission code — no "upload_material"
