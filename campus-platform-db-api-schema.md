@@ -15,6 +15,7 @@ Database: PostgreSQL. Backend: ASP.NET Core + EF Core (so these tables map direc
 |---|---|---|
 | id | uuid PK | |
 | name | text | |
+| time_zone | text | IANA name (e.g. `Asia/Kolkata`), default `UTC`. Used to derive "today"/session dates for this college instead of raw UTC (#152) |
 | created_at | timestamptz | |
 
 **`departments`**
