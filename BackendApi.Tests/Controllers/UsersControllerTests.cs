@@ -66,7 +66,7 @@ public class UsersControllerTests
     };
 
     private static UsersController ControllerAs(AppDbContext db, Guid userId, ITotpService? totpService = null) =>
-        new(db, new BcryptPasswordHasher(), totpService ?? new TotpService(new EphemeralDataProtectionProvider()), new PermissionService(db))
+        new(db, new BcryptPasswordHasher(), totpService ?? new TotpService(new EphemeralDataProtectionProvider()), new PermissionService(db), new CollegeScopeService(db))
         {
             ControllerContext = new ControllerContext
             {
@@ -89,6 +89,88 @@ public class UsersControllerTests
         await using var db = NewDb();
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
+        db.Users.AddRange(admin, target);
+        db.Permissions.Add(new Permission { Code = "reset_password", Description = "x" });
+        var role = new Role { Code = "admin" };
+        role.PermissionCodes.Add(db.Permissions.Local.First());
+        db.Roles.Add(role);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a-new-password1"));
+
+        Assert.IsType<NoContentResult>(result);
+        var updated = await db.Users.FindAsync(target.Id);
+        Assert.NotEqual("hash", updated!.PasswordHash);
+    }
+
+    // #140 — no server-side strength check existed before; a 1-character reset password
+    // used to be accepted and hashed as-is.
+    [Fact]
+    public async Task ResetPassword_RejectsWeakPassword()
+    {
+        await using var db = NewDb();
+        var admin = NewUser();
+        var target = NewUser();
+        target.CollegeId = admin.CollegeId;
+        db.Users.AddRange(admin, target);
+        db.Permissions.Add(new Permission { Code = "reset_password", Description = "x" });
+        var role = new Role { Code = "admin" };
+        role.PermissionCodes.Add(db.Permissions.Local.First());
+        db.Roles.Add(role);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a"));
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        var unchanged = await db.Users.FindAsync(target.Id);
+        Assert.Equal("hash", unchanged!.PasswordHash);
+    }
+
+    // #132 — an admin-initiated reset must revoke the target's existing sessions, not just
+    // update PasswordHash. Otherwise a JWT issued before the reset (e.g. to an attacker on a
+    // compromised account the admin is resetting specifically because of that) stays valid for
+    // the rest of its ~60-minute lifetime.
+    [Fact]
+    public async Task ResetPassword_RevokesAllActiveSessions_ForTheTargetUser()
+    {
+        await using var db = NewDb();
+        var admin = NewUser();
+        var target = NewUser();
+        target.CollegeId = admin.CollegeId; // same college - #128's cross-college check is orthogonal to this test
+        db.Users.AddRange(admin, target);
+        db.Permissions.Add(new Permission { Code = "reset_password", Description = "x" });
+        var role = new Role { Code = "admin" };
+        role.PermissionCodes.Add(db.Permissions.Local.First());
+        db.Roles.Add(role);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+
+        var targetSession = new UserSession { Id = Guid.NewGuid(), UserId = target.Id, IsActive = true };
+        var adminSession = new UserSession { Id = Guid.NewGuid(), UserId = admin.Id, IsActive = true };
+        db.UserSessions.AddRange(targetSession, adminSession);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a-new-password"));
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.False((await db.UserSessions.AsNoTracking().SingleAsync(s => s.Id == targetSession.Id)).IsActive);
+        // The admin's own session (a different user) must be untouched.
+        Assert.True((await db.UserSessions.AsNoTracking().SingleAsync(s => s.Id == adminSession.Id)).IsActive);
+    }
+
+    // #128 — cross-college account takeover: an admin holding reset_password (checked
+    // globally) must not be able to reset a user's password at a *different* college.
+    [Fact]
+    public async Task ResetPassword_ForbidsCrossCollegeTarget()
+    {
+        await using var db = NewDb();
+        var admin = NewUser();
+        var target = NewUser(); // different (random) CollegeId than admin, by construction
         db.Users.AddRange(admin, target);
         db.Permissions.Add(new Permission { Code = "reset_password", Description = "x" });
         var role = new Role { Code = "admin" };
@@ -100,9 +182,30 @@ public class UsersControllerTests
         var controller = ControllerAs(db, admin.Id);
         var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a-new-password"));
 
-        Assert.IsType<NoContentResult>(result);
-        var updated = await db.Users.FindAsync(target.Id);
-        Assert.NotEqual("hash", updated!.PasswordHash);
+        Assert.IsType<ForbidResult>(result);
+        var unchanged = await db.Users.FindAsync(target.Id);
+        Assert.Equal("hash", unchanged!.PasswordHash);
+    }
+
+    // #140 — same policy on account creation: InitialPassword must meet the minimum bar too.
+    [Fact]
+    public async Task Create_RejectsWeakInitialPassword()
+    {
+        await using var db = NewDb();
+        var admin = NewUser();
+        db.Users.Add(admin);
+        db.Permissions.Add(new Permission { Code = "manage_accounts", Description = "x" });
+        var role = new Role { Code = "admin" };
+        role.PermissionCodes.Add(db.Permissions.Local.First());
+        db.Roles.Add(role);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.Create(new CreateUserRequest(admin.CollegeId, AccountType.Student, "new-student", "weak", "New Student", null));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.False(await db.Users.AnyAsync(u => u.Identifier == "new-student"));
     }
 
     // #131 — Create must never persist the raw Base32 TOTP secret. What lands in
@@ -183,7 +286,7 @@ public class UsersControllerTests
 
         var controller = ControllerAs(db, admin);
         var result = await controller.Create(new CreateUserRequest(
-            Guid.NewGuid(), AccountType.Student, "new-student", "pw", "New Student", null));
+            admin.CollegeId, AccountType.Student, "new-student", "initial-pass1", "New Student", null));
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
     }
@@ -213,7 +316,7 @@ public class UsersControllerTests
     {
         await using var db = NewDb();
         var admin = NewUser(AccountType.AdminTier);
-        var target = NewUser(AccountType.Student);
+        var target = NewUser(AccountType.Student, admin.CollegeId);
         db.Users.AddRange(admin, target);
         db.PermissionGrants.Add(new PermissionGrant
         {

@@ -12,7 +12,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1/users")]
 [Authorize]
-public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, ITotpService totpService, IPermissionService permissions) : ControllerBase
+public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, ITotpService totpService, IPermissionService permissions, ICollegeScopeService collegeScope) : ControllerBase
 {
     // AWA-09: account creation. Returns the TOTP provisioning URI once, at creation time,
     // since SDA-02/TWA-03 login always requires a TOTP code alongside password.
@@ -33,6 +33,22 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         if (!await permissions.HasPermissionAsync(caller.Id, "manage_accounts"))
         {
             return Forbid();
+        }
+        // #129: manage_accounts is a global-scoped permission enforced platform-wide today,
+        // but is meant to be college-scoped (architecture doc Section 9) — without this, an
+        // IT/Admin at one college could create accounts (including admin/it/finance) at any
+        // other college.
+        if (!await collegeScope.IsSameCollegeAsync(caller.Id, request.CollegeId))
+        {
+            return Forbid();
+        }
+
+        // #140: enforce a minimum strength policy before hashing, same as ResetPassword and
+        // AuthController.ChangePassword — an account's very first password shouldn't be weaker
+        // than what every later password change requires.
+        if (!PasswordPolicy.IsValid(request.InitialPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
         }
 
         // #131: only the raw secret (used below for the one-time provisioning URI/response)
@@ -171,8 +187,33 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         {
             return NotFound();
         }
+        // #128: reset_password is a global-scoped permission today; without this check any
+        // holder (typically IT) can take over accounts — including other colleges' admins —
+        // by resetting their password. Mirrors GetProfile's existing correct CollegeId check.
+        if (user.CollegeId != caller.CollegeId)
+        {
+            return Forbid();
+        }
+
+        // #140: same minimum strength policy as account creation and self-service change.
+        if (!PasswordPolicy.IsValid(request.NewPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
+        }
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+
+        // #132 — an admin-initiated reset must also cut off any session issued under the old
+        // password (often the exact reason the reset is being done — a phished/compromised
+        // account). Without this, the target's existing JWT/session stayed valid for the rest
+        // of its ~60-minute lifetime regardless of the reset. Mirrors the single-active-session
+        // flip Login performs on the target user's *next* login.
+        var activeSessions = await db.UserSessions.Where(s => s.UserId == id && s.IsActive).ToListAsync();
+        foreach (var session in activeSessions)
+        {
+            session.IsActive = false;
+        }
+
         await db.SaveChangesAsync();
         return NoContent();
     }

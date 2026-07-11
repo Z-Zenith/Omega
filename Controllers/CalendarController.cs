@@ -90,7 +90,20 @@ public class CalendarController(AppDbContext db, IPermissionService permissions)
 
         var registration = new EventRegistration { Id = Guid.NewGuid(), EventId = id, StudentId = student.Id };
         db.EventRegistrations.Add(registration);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // #94: two concurrent registration requests for the same (event, student) can both
+            // pass the existence check above before either commits — the losing request hits
+            // the unique constraint on (event_id, student_id) instead of a clean response.
+            // Mirrors BrowsingController.ApproveWhitelistRequest's identical race: drop the
+            // speculative insert and return the row the other request actually persisted.
+            db.Entry(registration).State = EntityState.Detached;
+            registration = await db.EventRegistrations.SingleAsync(r => r.EventId == id && r.StudentId == student.Id);
+        }
 
         return Ok(new RegisterForEventResponse(registration.EventId, registration.StudentId, registration.RegisteredAt));
     }
