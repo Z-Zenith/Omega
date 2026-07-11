@@ -203,6 +203,7 @@ public partial class AppDbContext : DbContext
             entity.HasKey(e => e.Id).HasName("colleges_pkey");
 
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.TimeZone).HasDefaultValue("UTC");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
         });
 

@@ -32,11 +32,6 @@ public class FeesController(AppDbContext db, IPermissionService permissions, ICo
             return BadRequest(new { error = "invalid_amount", message = "Fee amount must be greater than zero and no more than 10,000,000." });
         }
 
-        if (request.DueDate == default || request.DueDate < DateOnly.FromDateTime(DateTime.UtcNow))
-        {
-            return BadRequest(new { error = "invalid_due_date", message = "Due date must be a real date that isn't in the past." });
-        }
-
         var student = await db.Users.FindAsync(request.StudentId);
         if (student is null || student.AccountType != AccountType.Student)
         {
@@ -47,6 +42,14 @@ public class FeesController(AppDbContext db, IPermissionService permissions, ICo
         if (!await collegeScope.IsSameCollegeAsync(userId, student.CollegeId))
         {
             return Forbid();
+        }
+
+        // #152: "in the past" is judged against the student's college's local date, not raw
+        // UTC, matching the same fix applied to TimetableController.MarkAttendance.
+        var college = await db.Colleges.FindAsync(student.CollegeId);
+        if (request.DueDate == default || request.DueDate < CollegeClock.LocalDate(college, DateTime.UtcNow))
+        {
+            return BadRequest(new { error = "invalid_due_date", message = "Due date must be a real date that isn't in the past." });
         }
 
         var feeRecord = new FeeRecord
