@@ -73,12 +73,15 @@ public class FeesController(AppDbContext db, IPermissionService permissions, ICo
     [HttpPost("{id}/pay")]
     public async Task<ActionResult<PayFeeResponse>> Pay(Guid id)
     {
-        // Existence and ownership collapse into a single Forbid so an unauthorized caller can't
-        // distinguish "this fee doesn't exist" from "this fee isn't yours" by probing IDs.
+        // #93: existence and ownership collapse into a single NotFound (not Forbid) so an
+        // unauthorized caller can't distinguish "this fee doesn't exist" from "this fee isn't
+        // yours" by probing IDs — matches the standardized 404-for-both convention used by
+        // WardAccessFilter and BrowsingController.ApproveWhitelistRequest for other ward/scope-
+        // gated resources.
         var fee = await db.FeeRecords.FindAsync(id);
         if (fee is null || await ParentWardAccess.GetAuthorizedParentIdAsync(db, User, fee.StudentId) is null)
         {
-            return Forbid();
+            return NotFound();
         }
 
         var gatewayTxnId = $"sim_{Guid.NewGuid():N}";

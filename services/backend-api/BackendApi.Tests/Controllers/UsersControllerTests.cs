@@ -99,11 +99,36 @@ public class UsersControllerTests
         await db.SaveChangesAsync();
 
         var controller = ControllerAs(db, admin.Id);
-        var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a-new-password"));
+        var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a-new-password1"));
 
         Assert.IsType<NoContentResult>(result);
         var updated = await db.Users.FindAsync(target.Id);
         Assert.NotEqual("hash", updated!.PasswordHash);
+    }
+
+    // #140 — no server-side strength check existed before; a 1-character reset password
+    // used to be accepted and hashed as-is.
+    [Fact]
+    public async Task ResetPassword_RejectsWeakPassword()
+    {
+        await using var db = NewDb();
+        var admin = NewUser();
+        var target = NewUser();
+        target.CollegeId = admin.CollegeId;
+        db.Users.AddRange(admin, target);
+        db.Permissions.Add(new Permission { Code = "reset_password", Description = "x" });
+        var role = new Role { Code = "admin" };
+        role.PermissionCodes.Add(db.Permissions.Local.First());
+        db.Roles.Add(role);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a"));
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        var unchanged = await db.Users.FindAsync(target.Id);
+        Assert.Equal("hash", unchanged!.PasswordHash);
     }
 
     // #132 — an admin-initiated reset must revoke the target's existing sessions, not just
@@ -160,6 +185,27 @@ public class UsersControllerTests
         Assert.IsType<ForbidResult>(result);
         var unchanged = await db.Users.FindAsync(target.Id);
         Assert.Equal("hash", unchanged!.PasswordHash);
+    }
+
+    // #140 — same policy on account creation: InitialPassword must meet the minimum bar too.
+    [Fact]
+    public async Task Create_RejectsWeakInitialPassword()
+    {
+        await using var db = NewDb();
+        var admin = NewUser();
+        db.Users.Add(admin);
+        db.Permissions.Add(new Permission { Code = "manage_accounts", Description = "x" });
+        var role = new Role { Code = "admin" };
+        role.PermissionCodes.Add(db.Permissions.Local.First());
+        db.Roles.Add(role);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.Create(new CreateUserRequest(admin.CollegeId, AccountType.Student, "new-student", "weak", "New Student", null));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.False(await db.Users.AnyAsync(u => u.Identifier == "new-student"));
     }
 
     // #131 — Create must never persist the raw Base32 TOTP secret. What lands in
@@ -240,7 +286,7 @@ public class UsersControllerTests
 
         var controller = ControllerAs(db, admin);
         var result = await controller.Create(new CreateUserRequest(
-            admin.CollegeId, AccountType.Student, "new-student", "pw", "New Student", null));
+            admin.CollegeId, AccountType.Student, "new-student", "initial-pass1", "New Student", null));
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
     }

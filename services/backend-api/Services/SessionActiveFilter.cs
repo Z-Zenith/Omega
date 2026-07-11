@@ -44,5 +44,12 @@ public class SessionActiveFilter(ISessionActivityService sessionActivityService)
         {
             context.Result = new UnauthorizedObjectResult(new { error = "session_revoked", message = "This session is no longer active." });
         }
+
+        // #141: this only checks the session row's own IsActive flag, not the owning user's
+        // User.IsActive account-level flag — no endpoint today ever flips an existing user's
+        // IsActive to false after creation, so there's no live gap yet. Whenever an
+        // account-deactivation endpoint is added, this filter also needs to deny requests
+        // riding on an otherwise-"active" session that belongs to an already-deactivated
+        // account, not just sessions that were explicitly revoked.
     }
 }

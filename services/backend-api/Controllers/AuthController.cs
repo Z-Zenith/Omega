@@ -129,6 +129,12 @@ public class AuthController(
             return Unauthorized(new { error = "invalid_totp", message = "TOTP challenge failed." });
         }
 
+        // #140: same minimum strength policy as account creation and admin-initiated reset.
+        if (!PasswordPolicy.IsValid(request.NewPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
+        }
+
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
 
         // #132 — a password change must also cut off any session issued under the old

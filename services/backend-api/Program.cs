@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
@@ -5,6 +6,7 @@ using BackendApi.Hubs;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -71,6 +73,8 @@ builder.Services.AddScoped<WardAccessFilter>();
 builder.Services.AddScoped<ISessionActivityService, SessionActivityService>();
 builder.Services.AddScoped<SessionActiveFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
+// #134: per-roll-number login lockout must be shared across requests, not per-scope/request.
+builder.Services.AddSingleton<ParentLoginLockoutService>();
 builder.Services.AddScoped<ICollegeScopeService, CollegeScopeService>();
 // Notification Router (shared) — see Services/INotificationRouter.cs.
 builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
@@ -137,6 +141,30 @@ builder.Services.AddAuthorization();
 // so it doesn't throttle normal authenticated traffic.
 builder.Services.AddRateLimiter(RateLimiterPolicies.ConfigureAuth);
 
+// #141: RateLimiterPolicies partitions on httpContext.Connection.RemoteIpAddress, which is
+// only the real client IP when backend-api receives connections directly — true today (no
+// reverse proxy in this repo's compose setup). ForwardedHeadersMiddleware is only registered
+// (and only trusts X-Forwarded-For/-Proto) when TrustedProxies is explicitly configured, so
+// this is a no-op — and doesn't change today's behavior at all — until someone deliberately
+// puts a known proxy in front and configures it here. Trusting those headers from an
+// unconfigured/unknown source would let any client spoof its own rate-limiter partition key.
+var trustedProxies = builder.Configuration.GetSection("TrustedProxies").Get<string[]>() ?? [];
+if (trustedProxies.Length > 0)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.KnownProxies.Clear();
+        foreach (var proxy in trustedProxies)
+        {
+            if (IPAddress.TryParse(proxy, out var ip))
+            {
+                options.KnownProxies.Add(ip);
+            }
+        }
+    });
+}
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -144,6 +172,28 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
+if (trustedProxies.Length > 0)
+{
+    app.UseForwardedHeaders();
+}
+
+// #141: no HSTS/security headers existed at all. HSTS only applies outside Development so a
+// local dev cert/http workflow isn't broken. This is a JSON API with no HTML to render, so
+// the CSP is intentionally the strictest "deny everything" policy rather than a page-specific
+// one.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("Content-Security-Policy", "default-src 'none'");
+    await next();
+});
 
 app.UseHttpsRedirection();
 

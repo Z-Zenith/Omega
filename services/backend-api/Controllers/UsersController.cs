@@ -43,6 +43,14 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return Forbid();
         }
 
+        // #140: enforce a minimum strength policy before hashing, same as ResetPassword and
+        // AuthController.ChangePassword — an account's very first password shouldn't be weaker
+        // than what every later password change requires.
+        if (!PasswordPolicy.IsValid(request.InitialPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
+        }
+
         // #131: only the raw secret (used below for the one-time provisioning URI/response)
         // ever exists outside the DB. What lands in User.TotpSecret is always the encrypted
         // form — never the raw Base32 value GenerateSecret() returns.
@@ -185,6 +193,12 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         if (user.CollegeId != caller.CollegeId)
         {
             return Forbid();
+        }
+
+        // #140: same minimum strength policy as account creation and self-service change.
+        if (!PasswordPolicy.IsValid(request.NewPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
         }
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
