@@ -13,7 +13,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1/fees")]
 [Authorize]
-public class FeesController(AppDbContext db, IPermissionService permissions, IConfiguration configuration) : ControllerBase
+public class FeesController(AppDbContext db, IPermissionService permissions, IConfiguration configuration, ICollegeScopeService collegeScope) : ControllerBase
 {
     // AWA-04 (Track 2). One FeeRecord per link, so the link is only ever valid for the
     // exact amount/due-date it was generated with — a link can't later be reused/edited
@@ -32,15 +32,24 @@ public class FeesController(AppDbContext db, IPermissionService permissions, ICo
             return BadRequest(new { error = "invalid_amount", message = "Fee amount must be greater than zero and no more than 10,000,000." });
         }
 
-        if (request.DueDate == default || request.DueDate < DateOnly.FromDateTime(DateTime.UtcNow))
-        {
-            return BadRequest(new { error = "invalid_due_date", message = "Due date must be a real date that isn't in the past." });
-        }
-
         var student = await db.Users.FindAsync(request.StudentId);
         if (student is null || student.AccountType != AccountType.Student)
         {
             return BadRequest(new { error = "unknown_student", message = "No student exists with that id." });
+        }
+        // #129: manage_fees is checked globally; without this, a caller at one college could
+        // create a fee link (and payment obligation) against a student at any other college.
+        if (!await collegeScope.IsSameCollegeAsync(userId, student.CollegeId))
+        {
+            return Forbid();
+        }
+
+        // #152: "in the past" is judged against the student's college's local date, not raw
+        // UTC, matching the same fix applied to TimetableController.MarkAttendance.
+        var college = await db.Colleges.FindAsync(student.CollegeId);
+        if (request.DueDate == default || request.DueDate < CollegeClock.LocalDate(college, DateTime.UtcNow))
+        {
+            return BadRequest(new { error = "invalid_due_date", message = "Due date must be a real date that isn't in the past." });
         }
 
         var feeRecord = new FeeRecord
@@ -67,12 +76,15 @@ public class FeesController(AppDbContext db, IPermissionService permissions, ICo
     [HttpPost("{id}/pay")]
     public async Task<ActionResult<PayFeeResponse>> Pay(Guid id)
     {
-        // Existence and ownership collapse into a single Forbid so an unauthorized caller can't
-        // distinguish "this fee doesn't exist" from "this fee isn't yours" by probing IDs.
+        // #93: existence and ownership collapse into a single NotFound (not Forbid) so an
+        // unauthorized caller can't distinguish "this fee doesn't exist" from "this fee isn't
+        // yours" by probing IDs — matches the standardized 404-for-both convention used by
+        // WardAccessFilter and BrowsingController.ApproveWhitelistRequest for other ward/scope-
+        // gated resources.
         var fee = await db.FeeRecords.FindAsync(id);
         if (fee is null || await ParentWardAccess.GetAuthorizedParentIdAsync(db, User, fee.StudentId) is null)
         {
-            return Forbid();
+            return NotFound();
         }
 
         var gatewayTxnId = $"sim_{Guid.NewGuid():N}";

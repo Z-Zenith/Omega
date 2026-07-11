@@ -6,7 +6,14 @@ services:
     environment:
       POSTGRES_DB: campus
       POSTGRES_USER: campus
-      POSTGRES_PASSWORD: campus_dev
+      # Required — no default. Mirrors the JWT_SIGNING_KEY fail-fast pattern
+      # below: set POSTGRES_PASSWORD in the shell/.env before `docker compose
+      # up` (see .env.example). Also read by db/init/03_create_app_role.sh to
+      # provision the least-privilege campus_app role (#137).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting postgres}
+      # Dev-only default documented in .env.example; rotate before any
+      # non-dev deploy. See db/init/03_create_app_role.sh (#137).
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-campus_app_dev}
     ports:
       - "5432:5432"
     volumes:
@@ -31,6 +38,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Defense-in-depth container ceiling (#138) — not sized for a specific
+    # model workload, just a backstop against one runaway process consuming
+    # the whole host. Raise if a real model-serving workload needs more.
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
 
   # Dev/CI-only image with pytest + tests/ baked in — not used at runtime.
   # Run tests with: docker compose run --rm ai-services-test pytest
@@ -47,7 +60,10 @@ services:
     container_name: campus-backend-api
     restart: unless-stopped
     environment:
-      ConnectionStrings__Campus: "Host=postgres;Port=5432;Database=campus;Username=campus;Password=campus_dev"
+      # POSTGRES_PASSWORD is required (see postgres service above) and reused here so the
+      # two never drift. Program.cs also fails fast outside Development if this still
+      # resolves to the committed appsettings.json dev placeholder.
+      ConnectionStrings__Campus: "Host=postgres;Port=5432;Database=campus;Username=campus;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting backend-api}"
       # Required in non-Development environments — backend-api fails fast at startup if unset.
       # Set JWT_SIGNING_KEY in the shell/.env before `docker compose up`; never commit a real value.
       Jwt__Key: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY before starting backend-api}
@@ -61,17 +77,44 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      authz:
+        condition: service_healthy
+    # Defense-in-depth container ceiling (#138).
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
 
   authz:
     image: openfga/openfga:latest
     container_name: campus-authz
     restart: unless-stopped
+    environment:
+      OPENFGA_AUTHN_METHOD: preshared
+      # Required — no default. Without this, any container on the compose network
+      # (backend-api, ai-services, or anything that compromises one of them) could
+      # read/write arbitrary authorization tuples on authz:8080 with no credential
+      # and no audit trail (#133). Mirrors the JWT_SIGNING_KEY fail-fast pattern
+      # used for backend-api above. Set OPENFGA_PRESHARED_KEY in the shell/.env
+      # before `docker compose up`; clients must send it as
+      # `Authorization: Bearer <key>` (see services/authz/README.md).
+      OPENFGA_AUTHN_PRESHARED_KEYS: ${OPENFGA_PRESHARED_KEY:?Set OPENFGA_PRESHARED_KEY before starting authz}
     command: run --datastore-engine memory --playground-enabled
     ports:
       - "127.0.0.1:8081:8080" # HTTP API — loopback-only, not for external access
       - "127.0.0.1:8082:3000" # Playground UI, dev convenience only
-    # No healthcheck: the openfga image ships no shell/wget/curl to probe with.
-    # `curl http://localhost:8081/healthz` from the host confirms liveness instead.
+    healthcheck:
+      # openfga's image (cgr.dev/chainguard/static) is distroless — no shell, no
+      # curl/wget. The only probe binary it ships is grpc_health_probe, which
+      # upstream's own Dockerfile uses against the gRPC listener (container-internal
+      # port 8081, unrelated to the host port mapping above) for exactly this
+      # purpose — it backs the same grpc.health.v1.Health check that /healthz
+      # answers over HTTP, so this is the practical equivalent of probing
+      # /healthz from inside the container. A manual
+      # `curl http://localhost:8081/healthz` from the host still works too.
+      test: ["CMD", "grpc_health_probe", "-addr=:8081"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   judge0-db:
     image: postgres:16-alpine
@@ -80,6 +123,14 @@ services:
     environment:
       POSTGRES_DB: judge0
       POSTGRES_USER: judge0
+      # Hardcoded dev-only credential (#137). Not env-var-templated like the main
+      # postgres/authz services above: this password must stay byte-for-byte
+      # identical to POSTGRES_PASSWORD in services/code-execution/judge0.conf,
+      # which judge0.conf's flat key=value format can't pull from a shell/.env
+      # var at container-init time the way docker-compose.yml can. No port is
+      # published (internal-network-only, reachable only by judge0-server/workers)
+      # which limits the blast radius, but rotate this — and the matching value
+      # in judge0.conf — together before any non-dev deploy.
       POSTGRES_PASSWORD: judge0_dev
     volumes:
       - campus-judge0-db-data:/var/lib/postgresql/data
@@ -88,6 +139,10 @@ services:
     image: redis:7-alpine
     container_name: campus-judge0-redis
     restart: unless-stopped
+    # Hardcoded dev-only credential (#137), same constraint as judge0-db above:
+    # must match REDIS_PASSWORD in services/code-execution/judge0.conf exactly.
+    # Internal-network-only (no published port). Rotate both together before
+    # any non-dev deploy.
     command: ["redis-server", "--requirepass", "judge0_redis_dev"]
 
   # Code Execution Service (CEX) — runs untrusted student code (SEK-01).
@@ -107,6 +162,13 @@ services:
     image: judge0/judge0:1.13.1
     container_name: campus-judge0-server
     restart: unless-stopped
+    # SECURITY-LOAD-BEARING (#95): required for isolate's sandboxing, mitigated by
+    # everything documented in the block comment above (loopback-only port,
+    # judge0.conf's resource ceilings, ENABLE_NETWORK=false). Do NOT flip this to
+    # `false` "temporarily for debugging" and forget to revert it — and do not
+    # relax it without re-reviewing the mitigations, since without them this is a
+    # full host-privileged sandbox escape waiting to happen for whoever can reach
+    # this container.
     privileged: true
     volumes:
       - ./services/code-execution/judge0.conf:/judge0.conf:ro
@@ -115,18 +177,37 @@ services:
     depends_on:
       - judge0-db
       - judge0-redis
+    # Container-level ceiling (#138): judge0.conf's MAX_MEMORY_LIMIT=256000 (~250MB)
+    # and MAX_PROCESSES_AND_OR_THREADS=60 are per-submission caps, not an aggregate
+    # one — a burst of concurrent requests on the synchronous (wait=true) path could
+    # otherwise each stay within their own ceiling while exhausting the host in
+    # aggregate. Sized for a handful of concurrent synchronous requests plus isolate
+    # overhead, not just one.
+    mem_limit: 1.5g
+    cpus: 1.5
+    pids_limit: 512
 
   judge0-workers:
     image: judge0/judge0:1.13.1
     container_name: campus-judge0-workers
     restart: unless-stopped
     command: ["./scripts/workers"]
+    # SECURITY-LOAD-BEARING (#95): see judge0-server above — same isolate
+    # sandboxing requirement, same mitigations, same warning: never relax this
+    # "temporarily" and leave it relaxed.
     privileged: true
     volumes:
       - ./services/code-execution/judge0.conf:/judge0.conf:ro
     depends_on:
       - judge0-db
       - judge0-redis
+    # Container-level ceiling (#138): this is where actual submission execution
+    # happens (MAX_QUEUE_SIZE=100 in judge0.conf), so it needs headroom for
+    # several submissions running concurrently, each up to the per-submission
+    # ceilings above — not just one submission's worth of memory/PIDs.
+    mem_limit: 3g
+    cpus: 2.0
+    pids_limit: 1024
 
 volumes:
   campus-pg-data:

@@ -102,6 +102,17 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
             return NotFound();
         }
 
+        // #135: verify the caller is actually enrolled in a section this assignment's
+        // subject is taught to, mirroring MarksController.CreateInternal's
+        // TeacherSectionAssignments/SectionEnrollments check — without this, any
+        // authenticated student could submit against any assignment id in the system
+        // (IDOR). Collapsed into the same NotFound() as "assignment doesn't exist" (#93)
+        // so an unenrolled caller can't distinguish the two by probing ids.
+        if (!await IsEnrolledInAssignmentSubjectAsync(userId, assignment.SubjectId))
+        {
+            return NotFound();
+        }
+
         if (string.IsNullOrWhiteSpace(request.ContentUrl))
         {
             return BadRequest(new { error = "content_required", message = "Submission content must not be empty." });
@@ -174,6 +185,13 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
             return NotFound();
         }
 
+        // #135: same enrollment check as Submit() above — an auto-submit request must be
+        // gated by section enrollment too, not just a valid-looking assignment id.
+        if (!await IsEnrolledInAssignmentSubjectAsync(userId, assignment.SubjectId))
+        {
+            return NotFound();
+        }
+
         var now = DateTime.UtcNow;
         if (now < assignment.SubmissionWindowStart || now > assignment.SubmissionWindowEnd)
         {
@@ -238,6 +256,25 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
 
     [HttpPost("submissions/{id}/grade")]
     public IActionResult Grade(Guid id) => StatusCode(501, new { feature = "grade-confirm", status = "not_implemented" });
+
+    // #135: a student is "enrolled in this assignment's subject" if they're a member of
+    // any section that subject is actually taught to — same TeacherSectionAssignments +
+    // SectionEnrollments join MarksController.CreateInternal uses to scope teacher writes,
+    // applied here to scope student submissions instead.
+    private async Task<bool> IsEnrolledInAssignmentSubjectAsync(Guid studentId, Guid subjectId)
+    {
+        var taughtSectionIds = await db.TeacherSectionAssignments
+            .Where(a => a.SubjectId == subjectId)
+            .Select(a => a.SectionId)
+            .ToListAsync();
+        if (taughtSectionIds.Count == 0)
+        {
+            return false;
+        }
+
+        return await db.SectionEnrollments
+            .AnyAsync(e => e.StudentId == studentId && taughtSectionIds.Contains(e.SectionId));
+    }
 
     private static bool IsValidJson(string value)
     {

@@ -14,7 +14,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class CommunityController(AppDbContext db, IPermissionService permissions) : ControllerBase
+public class CommunityController(AppDbContext db, IPermissionService permissions, IConfiguration configuration) : ControllerBase
 {
     // TWA-05, AWA-12. The auto-provisioned class group (API-02) is not created through
     // this endpoint — GroupType.Class is reserved for that automation, so a caller can't
@@ -200,6 +200,12 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         {
             return BadRequest(new { error = "invalid_url", message = "fileUrl must be an absolute http:// or https:// address." });
         }
+        // #136: reject an off-platform FileUrl at upload time too, not just at download —
+        // fail fast rather than storing a link that DownloadMaterial will refuse later anyway.
+        if (!MaterialUrlPolicy.IsAllowedHost(request.FileUrl, AllowedMaterialHosts))
+        {
+            return BadRequest(new { error = "disallowed_host", message = "fileUrl must point at an approved storage/CDN host." });
+        }
         if (request.SubjectId is null && request.GroupId is null)
         {
             return BadRequest(new { error = "target_required", message = "Attach material to a subject, a group, or both." });
@@ -253,8 +259,23 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
             return Forbid();
         }
 
+        // #136: defense in depth — UploadMaterial already rejects a disallowed host, but this
+        // re-check ensures a row written before the allowlist existed (or by any other path)
+        // can never turn this endpoint into an open redirect to an arbitrary external site.
+        if (!MaterialUrlPolicy.IsAllowedHost(material.FileUrl, AllowedMaterialHosts))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = "disallowed_host",
+                message = "This material's file host is not on the approved list; contact an administrator.",
+            });
+        }
+
         return Redirect(material.FileUrl);
     }
+
+    private string[] AllowedMaterialHosts =>
+        configuration.GetSection("MaterialStorage:AllowedHosts").Get<string[]>() ?? [];
 
     private async Task<bool> CanViewMaterialAsync(Material material, User caller)
     {

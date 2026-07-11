@@ -186,7 +186,8 @@ public partial class User
     // previous row to is_active=false instead of deleting it, so multiple historical rows
     // accumulate per user. Modeled as a collection (not a one-to-one nav) so EF can't return
     // an arbitrary row — callers must explicitly filter .Where(s => s.IsActive) to get the
-    // current session.
+    // current session. Also load-bearing for #130/#132's session-revocation work, which
+    // relies on iterating every active session for a user.
     [InverseProperty("User")]
     public virtual ICollection<UserSession> UserSessions { get; set; } = new List<UserSession>();
 

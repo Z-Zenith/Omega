@@ -46,7 +46,7 @@ public class SessionActiveFilterTests
         db.UserSessions.Add(new UserSession { Id = sessionId, UserId = userId, IsActive = false });
         await db.SaveChangesAsync();
 
-        var filter = new SessionActiveFilter(db);
+        var filter = new SessionActiveFilter(new SessionActivityService(db));
         var context = NewContext(AuthenticatedUser(userId, sessionId));
 
         await filter.OnAuthorizationAsync(context);
@@ -66,7 +66,7 @@ public class SessionActiveFilterTests
         db.UserSessions.Add(new UserSession { Id = sessionId, UserId = sessionOwnerId, IsActive = true });
         await db.SaveChangesAsync();
 
-        var filter = new SessionActiveFilter(db);
+        var filter = new SessionActiveFilter(new SessionActivityService(db));
         var context = NewContext(AuthenticatedUser(callerId, sessionId));
 
         await filter.OnAuthorizationAsync(context);
@@ -83,7 +83,7 @@ public class SessionActiveFilterTests
         db.UserSessions.Add(new UserSession { Id = sessionId, UserId = userId, IsActive = true });
         await db.SaveChangesAsync();
 
-        var filter = new SessionActiveFilter(db);
+        var filter = new SessionActiveFilter(new SessionActivityService(db));
         var context = NewContext(AuthenticatedUser(userId, sessionId));
 
         await filter.OnAuthorizationAsync(context);
@@ -95,7 +95,7 @@ public class SessionActiveFilterTests
     public async Task SkipsCheck_ForAllowAnonymousEndpoints()
     {
         await using var db = NewDb();
-        var filter = new SessionActiveFilter(db);
+        var filter = new SessionActiveFilter(new SessionActivityService(db));
         // No session row exists at all for this session_id — would fail the check if it ran.
         var context = NewContext(AuthenticatedUser(Guid.NewGuid(), Guid.NewGuid()), allowAnonymous: true);
 
@@ -108,7 +108,7 @@ public class SessionActiveFilterTests
     public async Task SkipsCheck_ForUnauthenticatedRequests()
     {
         await using var db = NewDb();
-        var filter = new SessionActiveFilter(db);
+        var filter = new SessionActiveFilter(new SessionActivityService(db));
         var context = NewContext(new ClaimsPrincipal(new ClaimsIdentity()));
 
         await filter.OnAuthorizationAsync(context);
