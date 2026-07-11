@@ -13,6 +13,9 @@
 
 Self-hosted OpenFGA, running via `docker compose up -d authz` (in-memory
 datastore for local dev — the `campus-authz` container in `docker-compose.yml`).
+The container requires `OPENFGA_PRESHARED_KEY` to be set (see `.env.example`) —
+`docker compose up` fails fast without it (#133). Every request to the HTTP
+API below must carry `Authorization: Bearer <OPENFGA_PRESHARED_KEY>`.
 The model in `model.fga` mirrors the ReBAC design in the architecture doc's
 Section 9: `college` is the tenant boundary, `department` is scoped beneath it,
 and role relations (`lecturer`, `hod`, `finance`, `it`, `admin`) compute the
@@ -32,23 +35,30 @@ and pushed to a store. From the repo root, with `docker compose up -d authz`
 already running:
 
 ```bash
+# Reuse the same key you set for OPENFGA_PRESHARED_KEY / OPENFGA_AUTHN_PRESHARED_KEYS.
+export OPENFGA_KEY="$OPENFGA_PRESHARED_KEY"
+
 # 1. Transform the DSL to JSON
 docker run --rm -v "$(pwd)/services/authz:/authz" openfga/cli:latest \
   model transform --file /authz/model.fga > /tmp/model.json
 
 # 2. Create a store (once — reuse the returned id afterwards)
 STORE_ID=$(curl -s -X POST http://localhost:8081/stores \
+  -H "Authorization: Bearer $OPENFGA_KEY" \
   -H "Content-Type: application/json" -d '{"name":"campus-dev"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 
 # 3. Push the authorization model into that store
 curl -s -X POST "http://localhost:8081/stores/$STORE_ID/authorization-models" \
+  -H "Authorization: Bearer $OPENFGA_KEY" \
   -H "Content-Type: application/json" -d @/tmp/model.json
 ```
 
 The HTTP API is bound to `127.0.0.1:8081` only (not exposed beyond the host)
-since this is dev-only with `authentication is disabled` — do not point this
-setup at anything beyond a local machine.
+and requires the `OPENFGA_PRESHARED_KEY` bearer token on every request (#133)
+— still don't point this setup at anything beyond a local machine, since the
+in-memory datastore and dev-only key rotation practices here aren't meant for
+production use.
 
 ## Verifying a permission check
 
@@ -58,6 +68,7 @@ check the Week 0 foundation checklist calls out).
 ```bash
 # Write tuples: hod-alice is HoD of cs-dept, which belongs to cs-college
 curl -s -X POST "http://localhost:8081/stores/$STORE_ID/write" \
+  -H "Authorization: Bearer $OPENFGA_KEY" \
   -H "Content-Type: application/json" -d '{
   "writes": { "tuple_keys": [
     { "user": "college:cs-college", "relation": "college", "object": "department:cs-dept" },
@@ -66,6 +77,7 @@ curl -s -X POST "http://localhost:8081/stores/$STORE_ID/write" \
 
 # Check: expect {"allowed":true}
 curl -s -X POST "http://localhost:8081/stores/$STORE_ID/check" \
+  -H "Authorization: Bearer $OPENFGA_KEY" \
   -H "Content-Type: application/json" -d '{
     "tuple_key": {"user":"user:hod-alice","relation":"approve_external_marks","object":"department:cs-dept"}
   }'
