@@ -5,6 +5,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Hubs;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -23,6 +24,20 @@ builder.Services.AddOpenApi();
 var connectionString = builder.Configuration.GetConnectionString("Campus")
     ?? throw new InvalidOperationException("Missing ConnectionStrings:Campus configuration.");
 
+// Same fail-fast shape as Jwt:Key below (#137): the committed appsettings.json value is a
+// dev-only placeholder (campus_dev on localhost). Unlike Jwt:Key, a missing override here
+// wasn't previously distinguishable from a deliberately-configured dev DB — if
+// ASPNETCORE_ENVIRONMENT=Production is set without also overriding ConnectionStrings__Campus,
+// the app would otherwise start up fine and silently point at the dev database.
+const string DevConnectionStringPlaceholder =
+    "Host=localhost;Port=5432;Database=campus;Username=campus;Password=campus_dev";
+if (!builder.Environment.IsDevelopment() && connectionString == DevConnectionStringPlaceholder)
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:Campus is still the committed dev-only placeholder from appsettings.json. " +
+        "Set the ConnectionStrings__Campus environment variable before starting in a non-Development environment.");
+}
+
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString, npgsqlOptions =>
 {
     npgsqlOptions
@@ -37,14 +52,30 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connect
         .MapEnum<WhitelistRequestStatus>();
 }));
 
+// #131: TOTP secrets are encrypted at rest via Data Protection (see TotpService). Keys must
+// be persisted outside the container's ephemeral filesystem or every restart/redeploy would
+// make every existing encrypted TotpSecret unreadable, locking every user out of login.
+// DOTNET_RUNNING_IN_CONTAINER is set by the official .NET base images, so this defaults to
+// the volume-mounted /keys path in Docker (see docker-compose.yml) and to a local folder
+// next to the build output otherwise (bare `dotnet run`, tests, etc.).
+var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
+    ?? (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true"
+        ? "/keys"
+        : Path.Combine(AppContext.BaseDirectory, "keys"));
+builder.Services.AddDataProtection()
+    .SetApplicationName("Campus.BackendApi")
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+
 builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<ITotpService, TotpService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
+builder.Services.AddScoped<ISessionActivityService, SessionActivityService>();
 builder.Services.AddScoped<SessionActiveFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
 // #134: per-roll-number login lockout must be shared across requests, not per-scope/request.
 builder.Services.AddSingleton<ParentLoginLockoutService>();
+builder.Services.AddScoped<ICollegeScopeService, CollegeScopeService>();
 // Notification Router (shared) — see Services/INotificationRouter.cs.
 builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
 builder.Services.AddSignalR();

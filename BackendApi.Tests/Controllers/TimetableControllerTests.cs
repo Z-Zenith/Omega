@@ -57,7 +57,7 @@ public class TimetableControllerTests
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
-        return new TimetableController(db, new FakePermissionService(), new FakeNotificationRouter())
+        return new TimetableController(db, new FakePermissionService(), new FakeNotificationRouter(), new CollegeScopeService(db))
         {
             ControllerContext = new ControllerContext
             {
@@ -571,5 +571,74 @@ public class TimetableControllerTests
         var summary = Assert.IsType<SectionPerformanceSummaryDto>(ok.Value);
         Assert.Null(summary.OverallAttendancePercentage);
         Assert.Null(summary.MarksBySubject.Single().AverageMarks);
+    }
+
+    // A global (non-HoD) create_timetable holder — GetDepartmentScopeAsync returns null,
+    // same as an Admin's binding with no "hod" role.
+    private class FakeGlobalTimetablePermissionService : IPermissionService
+    {
+        public Task<bool> HasPermissionAsync(Guid userId, string permissionCode) => Task.FromResult(permissionCode == "create_timetable");
+        public Task<Guid?> GetDepartmentScopeAsync(Guid userId) => Task.FromResult<Guid?>(null);
+    }
+
+    private static TimetableController GlobalCallerController(AppDbContext db, User caller)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, caller.Id.ToString())], "TestAuth"));
+        return new TimetableController(db, new FakeGlobalTimetablePermissionService(), new FakeNotificationRouter(), new CollegeScopeService(db))
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = principal } },
+        };
+    }
+
+    // #129 — PatchSlot's HoD-scope guard previously only ran when departmentScope was
+    // non-null, so a global create_timetable holder could patch any slot in any college by
+    // guessing/enumerating slot ids.
+    [Fact]
+    public async Task PatchSlot_ForbidsGlobalCallerFromCrossCollegeSlot()
+    {
+        await using var db = NewDb();
+        var caller = NewUser(AccountType.AdminTier);
+        var otherCollegeDepartment = NewDepartment(); // random CollegeId, different from caller's
+        var section = NewSection(otherCollegeDepartment.Id);
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = otherCollegeDepartment.Id, Code = "CS101", Name = "Intro" };
+        var slotTeacher = NewUser(AccountType.Teacher);
+        var slot = new TimetableSlot { Id = Guid.NewGuid(), SectionId = section.Id, SubjectId = subject.Id, TeacherId = slotTeacher.Id, DayOfWeek = 1, StartTime = new TimeOnly(9, 0), EndTime = new TimeOnly(10, 0) };
+        db.Users.AddRange(caller, slotTeacher);
+        db.Departments.Add(otherCollegeDepartment);
+        db.Sections.Add(section);
+        db.Subjects.Add(subject);
+        db.TimetableSlots.Add(slot);
+        await db.SaveChangesAsync();
+
+        var controller = GlobalCallerController(db, caller);
+        var result = await controller.PatchSlot(slot.Id, new PatchSlotRequest(null, null, null, null, null));
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task PatchSlot_AllowsGlobalCallerToPatchSameCollegeSlot()
+    {
+        await using var db = NewDb();
+        var caller = NewUser(AccountType.AdminTier);
+        var department = new Department { Id = Guid.NewGuid(), Name = "CS", CollegeId = caller.CollegeId };
+        var section = NewSection(department.Id);
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS101", Name = "Intro" };
+        var slotTeacher = NewUser(AccountType.Teacher);
+        var slot = new TimetableSlot { Id = Guid.NewGuid(), SectionId = section.Id, SubjectId = subject.Id, TeacherId = slotTeacher.Id, DayOfWeek = 1, StartTime = new TimeOnly(9, 0), EndTime = new TimeOnly(10, 0) };
+        db.Users.AddRange(caller, slotTeacher);
+        db.Departments.Add(department);
+        db.Sections.Add(section);
+        db.Subjects.Add(subject);
+        db.TimetableSlots.Add(slot);
+        await db.SaveChangesAsync();
+
+        var controller = GlobalCallerController(db, caller);
+        var result = await controller.PatchSlot(slot.Id, new PatchSlotRequest(null, 3, null, null, "Room 5"));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TimetableSlotDto>(ok.Value);
+        Assert.Equal(3, dto.DayOfWeek);
     }
 }
