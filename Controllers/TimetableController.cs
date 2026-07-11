@@ -426,7 +426,11 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
             return Forbid();
         }
 
-        var sessionDate = request.SessionDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        // #152: derive "today" from the college's local time zone, not raw UTC, so marking
+        // attendance near local midnight doesn't roll the session date to the wrong day and
+        // silently create a duplicate ClassSession for what the roster/UI treats as "today".
+        var college = await db.Colleges.FindAsync(caller.CollegeId);
+        var sessionDate = request.SessionDate ?? CollegeClock.LocalDate(college, DateTime.UtcNow);
         var session = await db.ClassSessions
             .FirstOrDefaultAsync(s => s.TimetableSlotId == slot.Id && s.SessionDate == sessionDate);
         if (session is null)
