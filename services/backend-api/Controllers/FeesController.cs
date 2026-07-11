@@ -13,7 +13,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1/fees")]
 [Authorize]
-public class FeesController(AppDbContext db, IPermissionService permissions, IConfiguration configuration) : ControllerBase
+public class FeesController(AppDbContext db, IPermissionService permissions, IConfiguration configuration, ICollegeScopeService collegeScope) : ControllerBase
 {
     // AWA-04 (Track 2). One FeeRecord per link, so the link is only ever valid for the
     // exact amount/due-date it was generated with — a link can't later be reused/edited
@@ -41,6 +41,12 @@ public class FeesController(AppDbContext db, IPermissionService permissions, ICo
         if (student is null || student.AccountType != AccountType.Student)
         {
             return BadRequest(new { error = "unknown_student", message = "No student exists with that id." });
+        }
+        // #129: manage_fees is checked globally; without this, a caller at one college could
+        // create a fee link (and payment obligation) against a student at any other college.
+        if (!await collegeScope.IsSameCollegeAsync(userId, student.CollegeId))
+        {
+            return Forbid();
         }
 
         var feeRecord = new FeeRecord

@@ -56,6 +56,7 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
 builder.Services.AddScoped<SessionActiveFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
+builder.Services.AddScoped<ICollegeScopeService, CollegeScopeService>();
 // Notification Router (shared) — see Services/INotificationRouter.cs.
 builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
 builder.Services.AddSignalR();

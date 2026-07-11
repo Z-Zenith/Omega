@@ -21,16 +21,29 @@ public class FeesControllerTests
         return new AppDbContext(options);
     }
 
-    private static User NewUser(AccountType accountType) => new()
+    private static User NewUser(AccountType accountType, Guid? collegeId = null) => new()
     {
         Id = Guid.NewGuid(),
-        CollegeId = Guid.NewGuid(),
+        CollegeId = collegeId ?? Guid.NewGuid(),
         Identifier = $"user-{Guid.NewGuid():N}",
         PasswordHash = "hash",
         FullName = "Test User",
         AccountType = accountType,
         IsActive = true,
     };
+
+    private static async Task GrantManageFeesViaRoleAsync(AppDbContext db, Guid userId)
+    {
+        db.Roles.Add(new Role { Code = "finance" });
+        db.Permissions.Add(new Permission { Code = "manage_fees", Description = "x" });
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = userId, RoleCode = "finance", GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var role = await db.Roles.FindAsync("finance");
+        var permission = await db.Permissions.FindAsync("manage_fees");
+        role!.PermissionCodes.Add(permission!);
+        await db.SaveChangesAsync();
+    }
 
     private static PermissionGrant GrantManageFees(Guid userId) => new()
     {
@@ -49,7 +62,7 @@ public class FeesControllerTests
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
-        return new FeesController(db, new PermissionService(db), configuration ?? new ConfigurationBuilder().Build())
+        return new FeesController(db, new PermissionService(db), configuration ?? new ConfigurationBuilder().Build(), new CollegeScopeService(db))
         {
             ControllerContext = new ControllerContext
             {
@@ -62,6 +75,41 @@ public class FeesControllerTests
         new ConfigurationBuilder()
             .AddInMemoryCollection([new("FeeReminder:DaysBeforeDue", daysBeforeDue.ToString())])
             .Build();
+
+    [Fact]
+    public async Task CreateLink_SucceedsForSameCollegeStudent()
+    {
+        await using var db = NewDb();
+        var college = Guid.NewGuid();
+        var caller = NewUser(AccountType.AdminTier, college);
+        var student = NewUser(AccountType.Student, college);
+        db.Users.AddRange(caller, student);
+        await GrantManageFeesViaRoleAsync(db, caller.Id);
+
+        var controller = ControllerAs(db, caller);
+        var result = await controller.CreateLink(new CreateFeeLinkRequest(student.Id, 5000m, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30))));
+
+        Assert.IsType<OkObjectResult>(result.Result);
+    }
+
+    // #129 — manage_fees is checked globally; without a CollegeId check, a caller at one
+    // college could create a fee link (and payment obligation) against a student at a
+    // different college.
+    [Fact]
+    public async Task CreateLink_ForbidsCrossCollegeStudent()
+    {
+        await using var db = NewDb();
+        var caller = NewUser(AccountType.AdminTier, Guid.NewGuid());
+        var student = NewUser(AccountType.Student, Guid.NewGuid()); // different college
+        db.Users.AddRange(caller, student);
+        await GrantManageFeesViaRoleAsync(db, caller.Id);
+
+        var controller = ControllerAs(db, caller);
+        var result = await controller.CreateLink(new CreateFeeLinkRequest(student.Id, 5000m, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30))));
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.FeeRecords.ToListAsync());
+    }
 
     // AWA-04
     [Fact]
@@ -191,7 +239,7 @@ public class FeesControllerTests
     {
         await using var db = NewDb();
         var finance = NewUser(AccountType.AdminTier);
-        var student = NewUser(AccountType.Student);
+        var student = NewUser(AccountType.Student, finance.CollegeId);
         db.Users.AddRange(finance, student);
         db.PermissionGrants.Add(GrantManageFees(finance.Id));
         await db.SaveChangesAsync();
@@ -221,7 +269,7 @@ public class FeesControllerTests
     {
         await using var db = NewDb();
         var admin = NewUser(AccountType.AdminTier);
-        var student = NewUser(AccountType.Student);
+        var student = NewUser(AccountType.Student, admin.CollegeId);
         db.Users.AddRange(admin, student);
         db.PermissionGrants.Add(GrantManageFees(admin.Id));
         await db.SaveChangesAsync();

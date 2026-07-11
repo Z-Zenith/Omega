@@ -66,7 +66,7 @@ public class UsersControllerTests
     };
 
     private static UsersController ControllerAs(AppDbContext db, Guid userId, ITotpService? totpService = null) =>
-        new(db, new BcryptPasswordHasher(), totpService ?? new TotpService(new EphemeralDataProtectionProvider()), new PermissionService(db))
+        new(db, new BcryptPasswordHasher(), totpService ?? new TotpService(new EphemeralDataProtectionProvider()), new PermissionService(db), new CollegeScopeService(db))
         {
             ControllerContext = new ControllerContext
             {
@@ -89,6 +89,7 @@ public class UsersControllerTests
         await using var db = NewDb();
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
         db.Users.AddRange(admin, target);
         db.Permissions.Add(new Permission { Code = "reset_password", Description = "x" });
         var role = new Role { Code = "admin" };
@@ -103,6 +104,30 @@ public class UsersControllerTests
         Assert.IsType<NoContentResult>(result);
         var updated = await db.Users.FindAsync(target.Id);
         Assert.NotEqual("hash", updated!.PasswordHash);
+    }
+
+    // #128 — cross-college account takeover: an admin holding reset_password (checked
+    // globally) must not be able to reset a user's password at a *different* college.
+    [Fact]
+    public async Task ResetPassword_ForbidsCrossCollegeTarget()
+    {
+        await using var db = NewDb();
+        var admin = NewUser();
+        var target = NewUser(); // different (random) CollegeId than admin, by construction
+        db.Users.AddRange(admin, target);
+        db.Permissions.Add(new Permission { Code = "reset_password", Description = "x" });
+        var role = new Role { Code = "admin" };
+        role.PermissionCodes.Add(db.Permissions.Local.First());
+        db.Roles.Add(role);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.ResetPassword(target.Id, new ResetPasswordRequest("a-new-password"));
+
+        Assert.IsType<ForbidResult>(result);
+        var unchanged = await db.Users.FindAsync(target.Id);
+        Assert.Equal("hash", unchanged!.PasswordHash);
     }
 
     // #131 — Create must never persist the raw Base32 TOTP secret. What lands in
@@ -183,7 +208,7 @@ public class UsersControllerTests
 
         var controller = ControllerAs(db, admin);
         var result = await controller.Create(new CreateUserRequest(
-            Guid.NewGuid(), AccountType.Student, "new-student", "pw", "New Student", null));
+            admin.CollegeId, AccountType.Student, "new-student", "pw", "New Student", null));
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
     }
@@ -213,7 +238,7 @@ public class UsersControllerTests
     {
         await using var db = NewDb();
         var admin = NewUser(AccountType.AdminTier);
-        var target = NewUser(AccountType.Student);
+        var target = NewUser(AccountType.Student, admin.CollegeId);
         db.Users.AddRange(admin, target);
         db.PermissionGrants.Add(new PermissionGrant
         {
