@@ -31,7 +31,7 @@ public class RolesControllerTests
         IsActive = true,
     };
 
-    private static RolesController ControllerAs(AppDbContext db, Guid userId) => new(db, new PermissionService(db))
+    private static RolesController ControllerAs(AppDbContext db, Guid userId) => new(db, new PermissionService(db), new CollegeScopeService(db))
     {
         ControllerContext = new ControllerContext
         {
@@ -80,6 +80,7 @@ public class RolesControllerTests
         await SeedRolesAndPermissionsAsync(db);
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
         db.Users.AddRange(admin, target);
         db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
@@ -94,6 +95,26 @@ public class RolesControllerTests
         Assert.Single(db.RoleBindings.Local, b => b.UserId == target.Id);
     }
 
+    // #127 — cross-college privilege escalation: an admin at one college must not be able
+    // to grant a role to a user at a different college.
+    [Fact]
+    public async Task CreateRoleBinding_ForbidsCrossCollegeTarget()
+    {
+        await using var db = NewDb();
+        await SeedRolesAndPermissionsAsync(db);
+        var admin = NewUser();
+        var target = NewUser(); // different (random) CollegeId than admin, by construction
+        db.Users.AddRange(admin, target);
+        db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin.Id);
+        var result = await controller.CreateRoleBinding(new CreateRoleBindingRequest(target.Id, "lecturer", ScopeKind.Global, null));
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.DoesNotContain(db.RoleBindings.Local, b => b.UserId == target.Id);
+    }
+
     // AWA-13
     [Fact]
     public async Task DeletePermissionGrant_RevokedOverrideStopsApplyingImmediately()
@@ -102,6 +123,7 @@ public class RolesControllerTests
         await SeedRolesAndPermissionsAsync(db);
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
         db.Users.AddRange(admin, target);
         db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
@@ -131,6 +153,7 @@ public class RolesControllerTests
         await SeedRolesAndPermissionsAsync(db);
         var admin = NewUser();
         var target = NewUser();
+        target.CollegeId = admin.CollegeId;
         db.Users.AddRange(admin, target);
         db.RoleBindings.Add(new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", ScopeType = ScopeKind.Global, GrantedAt = DateTime.UtcNow });
         await db.SaveChangesAsync();
@@ -139,5 +162,77 @@ public class RolesControllerTests
         var result = await controller.CreatePermissionGrant(new CreatePermissionGrantRequest(target.Id, "not_a_real_permission", true, null));
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    // #83 — regression coverage: every RolesController (AWA-13/14) endpoint must Forbid a
+    // caller with no manage_roles_and_permissions / manage_departments grant, matching the
+    // sibling FeesController/MarksController.Ward auth pattern. These endpoints already had
+    // [Authorize] + permission checks wired (not the 501-stub-with-no-auth state #83 was
+    // originally filed against), but lacked test coverage locking that guard in place.
+    [Fact]
+    public async Task ListRoleBindings_ForbidsCallerWithoutManagePermission()
+    {
+        await using var db = NewDb();
+        await SeedRolesAndPermissionsAsync(db);
+        var caller = NewUser();
+        db.Users.Add(caller);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, caller.Id);
+        var result = await controller.ListRoleBindings();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task ListPermissionGrants_ForbidsCallerWithoutManagePermission()
+    {
+        await using var db = NewDb();
+        await SeedRolesAndPermissionsAsync(db);
+        var caller = NewUser();
+        db.Users.Add(caller);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, caller.Id);
+        var result = await controller.ListPermissionGrants();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task CreateDepartment_ForbidsCallerWithoutManageDepartmentsPermission()
+    {
+        await using var db = NewDb();
+        await SeedRolesAndPermissionsAsync(db);
+        var caller = NewUser();
+        var college = new College { Id = Guid.NewGuid(), Name = "Test College" };
+        db.Users.Add(caller);
+        db.Colleges.Add(college);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, caller.Id);
+        var result = await controller.CreateDepartment(new CreateDepartmentRequest(college.Id, "Computer Science"));
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task AssignHod_ForbidsCallerWithoutManageDepartmentsPermission()
+    {
+        await using var db = NewDb();
+        await SeedRolesAndPermissionsAsync(db);
+        var caller = NewUser();
+        var candidate = NewUser();
+        var college = new College { Id = Guid.NewGuid(), Name = "Test College" };
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = college.Id, Name = "CS" };
+        db.Users.AddRange(caller, candidate);
+        db.Colleges.Add(college);
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, caller.Id);
+        var result = await controller.AssignHod(department.Id, new AssignHodRequest(candidate.Id));
+
+        Assert.IsType<ForbidResult>(result.Result);
     }
 }

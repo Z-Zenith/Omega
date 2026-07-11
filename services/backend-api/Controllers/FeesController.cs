@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
@@ -12,7 +13,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1/fees")]
 [Authorize]
-public class FeesController(AppDbContext db, IPermissionService permissions) : ControllerBase
+public class FeesController(AppDbContext db, IPermissionService permissions, IConfiguration configuration, ICollegeScopeService collegeScope) : ControllerBase
 {
     // AWA-04 (Track 2). One FeeRecord per link, so the link is only ever valid for the
     // exact amount/due-date it was generated with — a link can't later be reused/edited
@@ -40,6 +41,12 @@ public class FeesController(AppDbContext db, IPermissionService permissions) : C
         if (student is null || student.AccountType != AccountType.Student)
         {
             return BadRequest(new { error = "unknown_student", message = "No student exists with that id." });
+        }
+        // #129: manage_fees is checked globally; without this, a caller at one college could
+        // create a fee link (and payment obligation) against a student at any other college.
+        if (!await collegeScope.IsSameCollegeAsync(userId, student.CollegeId))
+        {
+            return Forbid();
         }
 
         var feeRecord = new FeeRecord
@@ -119,6 +126,91 @@ public class FeesController(AppDbContext db, IPermissionService permissions) : C
             .ToListAsync();
 
         return Ok(fees);
+    }
+
+    // AWA-05. No background-job runner exists anywhere in this codebase yet (other
+    // periodic-style requirements — AIS-03's copy-check, SDA-13's grace-period alert —
+    // are left as unimplemented stubs rather than growing one), so this is invoked
+    // on a schedule externally (e.g. a periodic job hitting this endpoint) rather than
+    // introducing a first-ever IHostedService for one Should-priority feature. Gated on
+    // manage_fees (same permission as CreateLink) since it's a privileged, institution-
+    // wide scan, not a per-request read.
+    //
+    // OPERATIONAL NOTE: this endpoint does nothing on its own — something (a cron job, a
+    // scheduled GitHub Action, etc.) must call it periodically for reminders to actually
+    // fire. That's a deployment/ops requirement this PR doesn't provision.
+    //
+    // Known accepted limitations, given no institution-timezone concept and no background
+    // scheduler exist anywhere else in this codebase (both would be larger, separate
+    // changes, not scoped to this Should-priority feature):
+    //   - The reminder window and "already reminded today" check use the server's UTC
+    //     calendar day, not the college's local day — a college in a non-UTC timezone can
+    //     see the window shift by up to a day relative to local time.
+    //   - Idempotency is per-parent-per-day, not per-fee: if a new fee enters the window
+    //     for a parent who was already reminded today, that specific fee waits until
+    //     tomorrow's run rather than triggering an immediate second reminder same-day.
+    [HttpPost("send-reminders")]
+    public async Task<ActionResult<SendFeeRemindersResponse>> SendReminders()
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "manage_fees"))
+        {
+            return Forbid();
+        }
+
+        var reminderDaysBefore = configuration.GetValue("FeeReminder:DaysBeforeDue", 3);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var reminderCutoff = today.AddDays(reminderDaysBefore);
+
+        // Joined up front rather than one ParentWards query per fee (this can scan
+        // thousands of pending fees over a school year) — one query resolves every
+        // (fee, parent) pair the reminder pass needs.
+        var feesByParent = (await db.FeeRecords
+                .Where(f => f.Status == FeeStatus.Pending && f.DueDate >= today && f.DueDate <= reminderCutoff)
+                .Join(db.ParentWards, f => f.StudentId, p => p.StudentId, (f, p) => new { Fee = f, p.ParentUserId })
+                .ToListAsync())
+            .GroupBy(x => x.ParentUserId, x => x.Fee)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Npgsql requires DateTimeKind.Utc for a value bound to a `timestamptz` column
+        // (notifications.created_at) — DateOnly.ToDateTime() always yields Unspecified,
+        // which throws at execution time against real Postgres (invisible under the
+        // EF Core InMemory provider used in tests, which doesn't validate DateTimeKind).
+        var todayStart = DateTime.SpecifyKind(today.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+
+        // Batched instead of one AnyAsync per parent — same N+1 concern as the join above.
+        var alreadyRemindedParentIds = await db.Notifications
+            .Where(n => feesByParent.Keys.Contains(n.RecipientId)
+                && n.Type == NotificationType.FeeReminder
+                && n.CreatedAt >= todayStart)
+            .Select(n => n.RecipientId)
+            .ToHashSetAsync();
+
+        var remindersSent = 0;
+        foreach (var (parentId, fees) in feesByParent)
+        {
+            if (alreadyRemindedParentIds.Contains(parentId))
+            {
+                continue;
+            }
+
+            db.Notifications.Add(new Notification
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = parentId,
+                Type = NotificationType.FeeReminder,
+                Payload = JsonSerializer.Serialize(new
+                {
+                    fees = fees.Select(f => new { feeRecordId = f.Id, studentId = f.StudentId, amount = f.Amount, dueDate = f.DueDate }),
+                }),
+                CreatedAt = DateTime.UtcNow,
+            });
+            remindersSent++;
+        }
+
+        await db.SaveChangesAsync();
+
+        return Ok(new SendFeeRemindersResponse(remindersSent));
     }
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);

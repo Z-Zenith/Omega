@@ -1,0 +1,51 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:models="using:StudentDesktop.Models"
+             xmlns:avconv="using:Avalonia.Data.Converters"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.TeacherFeedbackView"
+             x:DataType="vm:TeacherFeedbackViewModel">
+
+    <ScrollViewer>
+        <StackPanel Margin="20" Spacing="12" MaxWidth="480" HorizontalAlignment="Left">
+            <TextBlock Text="Teacher Feedback" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="Submit feedback about a teacher who taught one of your enrolled sections (SDA-17)."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+
+            <TextBlock Text="Teacher"/>
+            <ComboBox ItemsSource="{Binding Teachers}" SelectedItem="{Binding SelectedTeacher}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                    <!-- Includes SubjectName: the same teacher can appear once per subject
+                         they teach the student, so TeacherName alone wouldn't distinguish
+                         two otherwise-identical entries. -->
+                    <DataTemplate DataType="models:MyTeacherDto">
+                        <TextBlock>
+                            <Run Text="{Binding TeacherName}"/>
+                            <Run Text=" — "/>
+                            <Run Text="{Binding SubjectName}"/>
+                        </TextBlock>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBlock Text="No teachers found for your enrolled sections yet." Foreground="Gray"
+                       IsVisible="{Binding !Teachers.Count}"/>
+
+            <TextBlock Text="Rating (1-5)"/>
+            <NumericUpDown Value="{Binding Rating}" Minimum="1" Maximum="5" Increment="1" HorizontalAlignment="Left" Width="120"/>
+
+            <TextBlock Text="Comments (optional)"/>
+            <TextBox Text="{Binding Comments}" AcceptsReturn="True" TextWrapping="Wrap" Height="100"/>
+
+            <Button Content="Submit Feedback" Command="{Binding SubmitCommand}" IsEnabled="{Binding !IsBusy}" Margin="0,8,0,0"/>
+
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="IndianRed" TextWrapping="Wrap"
+                       IsVisible="{Binding ErrorMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+            <TextBlock Text="{Binding SuccessMessage}" Foreground="Green" TextWrapping="Wrap"
+                       IsVisible="{Binding SuccessMessage, Converter={x:Static avconv:StringConverters.IsNotNullOrEmpty}}"/>
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>

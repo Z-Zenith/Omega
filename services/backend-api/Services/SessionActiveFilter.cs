@@ -1,9 +1,7 @@
 using System.Security.Claims;
-using BackendApi.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Authorization;
 using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.EntityFrameworkCore;
 
 namespace BackendApi.Services;
 
@@ -13,7 +11,11 @@ namespace BackendApi.Services;
 // explicit logout) kept working against Timetable/Marks/Fees/Assignments/Community etc. for
 // the rest of its ~60-minute lifetime. Registered globally (Program.cs) so a new controller is
 // covered by default instead of depending on remembering to paste this check into it.
-public class SessionActiveFilter(AppDbContext db) : IAsyncAuthorizationFilter
+//
+// #130 — the actual "is the session still active/owned" check now lives in
+// ISessionActivityService so NotificationsHub (which this filter never runs for — it's a
+// SignalR Hub, not a controller) can share the same logic instead of duplicating it.
+public class SessionActiveFilter(ISessionActivityService sessionActivityService) : IAsyncAuthorizationFilter
 {
     public async Task OnAuthorizationAsync(AuthorizationFilterContext context)
     {
@@ -38,8 +40,7 @@ public class SessionActiveFilter(AppDbContext db) : IAsyncAuthorizationFilter
             return;
         }
 
-        var session = await db.UserSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId);
-        if (session is null || !session.IsActive || session.UserId != userId)
+        if (!await sessionActivityService.IsSessionActiveAsync(userId, sessionId))
         {
             context.Result = new UnauthorizedObjectResult(new { error = "session_revoked", message = "This session is no longer active." });
         }

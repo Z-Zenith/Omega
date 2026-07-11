@@ -181,8 +181,15 @@ public partial class User
     [InverseProperty("Student")]
     public virtual ICollection<UsageTelemetry> UsageTelemetries { get; set; } = new List<UsageTelemetry>();
 
+    // #92 — DB only enforces uniqueness on user_id where is_active = true (a partial unique
+    // index, see uniq_user_active_session in db/init/01_schema.sql); a new login flips the
+    // previous row to is_active=false instead of deleting it, so multiple historical rows
+    // accumulate per user. Modeled as a collection (not a one-to-one nav) so EF can't return
+    // an arbitrary row — callers must explicitly filter .Where(s => s.IsActive) to get the
+    // current session. Also load-bearing for #130/#132's session-revocation work, which
+    // relies on iterating every active session for a user.
     [InverseProperty("User")]
-    public virtual UserSession? UserSession { get; set; }
+    public virtual ICollection<UserSession> UserSessions { get; set; } = new List<UserSession>();
 
     [InverseProperty("RequestedByNavigation")]
     public virtual ICollection<WhitelistRequest> WhitelistRequestRequestedByNavigations { get; set; } = new List<WhitelistRequest>();

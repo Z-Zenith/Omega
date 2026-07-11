@@ -258,6 +258,33 @@ export function createUser(user: CreateUserRequest) {
   })
 }
 
+// AWA-12 — Admin can create community groups directly (in addition to viewing all
+// existing groups, AWA-06). Same POST /groups endpoint TWA-05 uses, gated by the
+// `create_group` permission (Lecturer/HoD/Admin by default — see services/authz/model.fga
+// and db/init/02_seed_roles_and_permissions.sql), so a group created here is
+// indistinguishable in structure from one a teacher creates.
+export type GroupType = 'SubjectSection' | 'Club' | 'TeacherOnly'
+
+export interface CreateGroupRequest {
+  name: string
+  type: GroupType
+  sectionId: string | null
+}
+
+export interface GroupDto {
+  id: string
+  name: string
+  type: string
+  sectionId: string | null
+}
+
+export function createGroup(group: CreateGroupRequest) {
+  return request<GroupDto>('/groups', {
+    method: 'POST',
+    body: JSON.stringify(group),
+  })
+}
+
 // AWA-07
 export interface TeacherRemarkDto {
   id: string
@@ -285,6 +312,22 @@ export interface SuspiciousFlagReportDto {
   classSessionId: string | null
 }
 
+// AWA-08 — same shapes SDA-15's MyMarksResponse uses, reused here so the Admin view
+// can't drift from what the student sees.
+export interface InternalMarkDto {
+  subjectId: string
+  subjectName: string
+  marks: number
+  publishedAt: string | null
+}
+
+export interface ExternalMarkDto {
+  subjectId: string
+  subjectName: string
+  grade: string
+  approvedAt: string | null
+}
+
 export interface StudentRecordDto {
   id: string
   fullName: string
@@ -296,10 +339,19 @@ export interface StudentRecordDto {
   remarks: TeacherRemarkDto[]
   browsingSummaries: BrowsingSummaryReportDto[]
   suspiciousFlags: SuspiciousFlagReportDto[]
+  internalMarks: InternalMarkDto[]
+  externalMarks: ExternalMarkDto[]
 }
 
 export function getStudentRecord(userId: string) {
   return request<StudentRecordDto>(`/users/${userId}/profile`)
+}
+
+// AWA-06 — institution-wide group visibility. Backend: CommunityController.AllGroups
+// (already on main), gated by view_all_groups (Lecturer/HoD/Admin by default). Reuses
+// the GroupDto declared above for AWA-12's createGroup.
+export function listAllGroups() {
+  return request<{ groups: GroupDto[] }>('/groups')
 }
 
 // AWA-04 — fee payment links. Backend: FeesController.CreateLink (already on main),

@@ -1,0 +1,21 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:StudentDesktop.ViewModels"
+             xmlns:webview="using:Avalonia.Controls"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="650"
+             x:Class="StudentDesktop.Views.MessagesView"
+             x:DataType="vm:MessagesViewModel">
+
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="16,12" Spacing="8">
+            <TextBlock Text="Messages" FontSize="20" FontWeight="Bold"/>
+            <TextBlock Text="SDA-24: powered by the Direct Messaging component (DMS-01)."
+                       TextWrapping="Wrap" Foreground="Gray"/>
+        </StackPanel>
+
+        <webview:NativeWebView x:Name="MessagesWebView"/>
+    </DockPanel>
+
+</UserControl>

@@ -1,0 +1,36 @@
+name: AI Services CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ai-services-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ai-services
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: services/ai-services/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Check for vulnerable Python packages
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt
