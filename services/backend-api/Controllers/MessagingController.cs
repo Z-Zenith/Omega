@@ -124,8 +124,12 @@ public class MessagingController(AppDbContext db) : ControllerBase
     // DMS-01 (Track 2) — not in the original documented API map, but required to
     // actually render a thread's conversation (sending was the only documented route).
     // Only a thread participant (or Admin) can read its messages.
+    //
+    // #159: paginated (page/pageSize query params, matching MarksController's [FromQuery]
+    // convention elsewhere in this codebase) — an unbounded ToListAsync() over an
+    // indefinitely-growing thread would otherwise load every message ever sent in it.
     [HttpGet("messages/threads/{id}/messages")]
-    public async Task<ActionResult<List<MessageResponse>>> ListMessages(Guid id)
+    public async Task<ActionResult<List<MessageResponse>>> ListMessages(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var thread = await db.MessageThreads.FindAsync(id);
         if (thread is null)
@@ -143,9 +147,12 @@ public class MessagingController(AppDbContext db) : ControllerBase
             return Forbid();
         }
 
+        var (skip, take) = NormalizePaging(page, pageSize);
         var messages = await db.Messages
             .Where(m => m.ThreadId == id)
             .OrderBy(m => m.SentAt)
+            .Skip(skip)
+            .Take(take)
             .ToListAsync();
 
         return Ok(messages.Select(ToResponse).ToList());
@@ -154,31 +161,49 @@ public class MessagingController(AppDbContext db) : ControllerBase
     // DMS-01 (Track 2) — the caller's own inbox, per the requirement ("deliver it to the
     // other party's inbox in their respective app"). Always the authenticated caller's own
     // threads — never an arbitrary userId — so one account can't read another's inbox.
+    //
+    // #159: previously .Include(t => t.Messages) pulled every message in every thread just
+    // to pick out each thread's last one, and the endpoint had no pagination at all. This
+    // projects only the latest message per thread (a correlated OrderByDescending().Take(1),
+    // not a full load of thread.Messages) and paginates the resulting thread list.
     [HttpGet("messages/threads")]
-    public async Task<ActionResult<List<ThreadSummaryResponse>>> ListThreads()
+    public async Task<ActionResult<List<ThreadSummaryResponse>>> ListThreads([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
     {
         var userId = CurrentUserId();
 
-        var threads = await db.MessageThreads
+        var projected = await db.MessageThreads
             .Where(t => t.StudentId == userId || t.TeacherId == userId)
-            .Include(t => t.Messages)
+            .Select(t => new
+            {
+                t.Id,
+                t.StudentId,
+                t.TeacherId,
+                t.CreatedAt,
+                LastMessage = t.Messages
+                    .OrderByDescending(m => m.SentAt)
+                    .Select(m => new MessageResponse(m.Id, m.ThreadId, m.SenderId, m.Content, m.SentAt, m.ReadAt))
+                    .FirstOrDefault(),
+            })
             .ToListAsync();
 
-        var summaries = threads
-            .Select(t =>
-            {
-                var lastMessage = t.Messages.OrderByDescending(m => m.SentAt).FirstOrDefault();
-                return new ThreadSummaryResponse(
-                    t.Id,
-                    t.StudentId,
-                    t.TeacherId,
-                    t.CreatedAt,
-                    lastMessage is null ? null : ToResponse(lastMessage));
-            })
+        var (skip, take) = NormalizePaging(page, pageSize);
+        var summaries = projected
+            .Select(t => new ThreadSummaryResponse(t.Id, t.StudentId, t.TeacherId, t.CreatedAt, t.LastMessage))
             .OrderByDescending(s => s.LastMessage?.SentAt ?? s.CreatedAt)
+            .Skip(skip)
+            .Take(take)
             .ToList();
 
         return Ok(summaries);
+    }
+
+    // #159: shared page/pageSize clamp — page is 1-based, pageSize is capped so a caller
+    // can't force an unbounded query by passing an absurdly large value.
+    private static (int Skip, int Take) NormalizePaging(int page, int pageSize)
+    {
+        var normalizedPage = Math.Max(page, 1);
+        var normalizedSize = Math.Clamp(pageSize, 1, 200);
+        return ((normalizedPage - 1) * normalizedSize, normalizedSize);
     }
 
     // Notification Router (shared)
