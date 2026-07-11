@@ -10,6 +10,10 @@ import { ExternalMarksPage } from '@/pages/ExternalMarksPage'
 import { AttendancePage } from '@/pages/AttendancePage'
 import { MarksPage } from '@/pages/MarksPage'
 import { MessagesPage } from '@/pages/MessagesPage'
+import { AssignmentsPage } from '@/pages/AssignmentsPage'
+import { MaterialsPage } from '@/pages/MaterialsPage'
+import { CommunityPage } from '@/pages/CommunityPage'
+import { NotesPage } from '@/pages/NotesPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -66,6 +70,10 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/marks">Marks</Link>
           <Link to="/approve-marks">Approve Marks</Link>
           <Link to="/messages">Messages</Link>
+          <Link to="/assignments">Assignments</Link>
+          <Link to="/materials">Materials</Link>
+          <Link to="/community">Community</Link>
+          <Link to="/notes">Notes</Link>
         </div>
         <div className="flex items-center gap-4">
           <SectionSwitcher />
@@ -174,6 +182,46 @@ function App() {
               <RequireAuth>
                 <Shell>
                   <MessagesPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/assignments"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <AssignmentsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/materials"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <MaterialsPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/community"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <CommunityPage />
+                </Shell>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/notes"
+            element={
+              <RequireAuth>
+                <Shell>
+                  <NotesPage />
                 </Shell>
               </RequireAuth>
             }

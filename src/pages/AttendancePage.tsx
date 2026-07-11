@@ -14,14 +14,14 @@ import {
 
 const STATUS_OPTIONS: AttendanceStatus[] = ['Present', 'Absent', 'Late']
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-// JS getDay(): 0=Sunday..6=Saturday. Backend's timetable grid runs Monday(1)..Friday(5).
-function todayDayOfWeek(): number {
-  const day = new Date().getDay()
-  return day === 0 ? 7 : day
+// JS getDay(): 0=Sunday..6=Saturday. Backend's timetable grid runs Monday(1)..Friday(5)
+// (TimetableController's scheduling Grid seeds DayOfWeek via Enumerable.Range(1, 5), i.e.
+// plain Mon=1..Fri=5). This matches activeSection.tsx's computeActiveSlot, which compares
+// slot.dayOfWeek directly against now.getDay() with no remapping — Sunday/Saturday simply
+// never match since no slot is ever scheduled on those days. Keep this function consistent
+// with that convention rather than inventing a separate 7-for-Sunday scheme.
+export function todayDayOfWeek(now: Date = new Date()): number {
+  return now.getDay()
 }
 
 export function AttendancePage() {
@@ -67,11 +67,13 @@ export function AttendancePage() {
   }, [roster.data])
 
   const markMutation = useMutation({
+    // Session date is left for the backend to derive from the college's local time zone
+    // (#152) rather than computed client-side, which was UTC-based (Date.toISOString())
+    // and could roll over to the wrong calendar day near local midnight.
     mutationFn: () =>
       markAttendance(
         selectedSlotId!,
         Object.entries(statuses).map(([studentId, status]) => ({ studentId, status })),
-        todayIso(),
       ),
     onSuccess: (response) => setMessage(`Attendance saved for ${response.records.length} student(s).`),
     onError: (err) =>
