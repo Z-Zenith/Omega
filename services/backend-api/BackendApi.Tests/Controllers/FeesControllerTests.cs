@@ -239,7 +239,7 @@ public class FeesControllerTests
     {
         await using var db = NewDb();
         var finance = NewUser(AccountType.AdminTier);
-        var student = NewUser(AccountType.Student);
+        var student = NewUser(AccountType.Student, finance.CollegeId);
         db.Users.AddRange(finance, student);
         db.PermissionGrants.Add(GrantManageFees(finance.Id));
         await db.SaveChangesAsync();
@@ -269,7 +269,7 @@ public class FeesControllerTests
     {
         await using var db = NewDb();
         var admin = NewUser(AccountType.AdminTier);
-        var student = NewUser(AccountType.Student);
+        var student = NewUser(AccountType.Student, admin.CollegeId);
         db.Users.AddRange(admin, student);
         db.PermissionGrants.Add(GrantManageFees(admin.Id));
         await db.SaveChangesAsync();

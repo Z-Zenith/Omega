@@ -208,7 +208,7 @@ public class UsersControllerTests
 
         var controller = ControllerAs(db, admin);
         var result = await controller.Create(new CreateUserRequest(
-            Guid.NewGuid(), AccountType.Student, "new-student", "pw", "New Student", null));
+            admin.CollegeId, AccountType.Student, "new-student", "pw", "New Student", null));
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
     }
@@ -238,7 +238,7 @@ public class UsersControllerTests
     {
         await using var db = NewDb();
         var admin = NewUser(AccountType.AdminTier);
-        var target = NewUser(AccountType.Student);
+        var target = NewUser(AccountType.Student, admin.CollegeId);
         db.Users.AddRange(admin, target);
         db.PermissionGrants.Add(new PermissionGrant
         {
