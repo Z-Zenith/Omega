@@ -1,11 +1,27 @@
-import { Fragment } from 'react'
+import { Fragment, useMemo } from 'react'
 import type { TimetableSlotDto } from '@/lib/api'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-const HOURS = [9, 10, 11, 12, 13, 14]
+
+// 9-15 is the auto-generator's own window (TimetableController.cs's scheduling Grid), so it's
+// a sensible default/minimum — but the slot-edit endpoint (TimetableController.cs:177-186)
+// accepts arbitrary start/end times with no server-side range check, so a manually rescheduled
+// slot can legitimately fall outside it. Render the range wide enough to always include every
+// slot actually present rather than hardcoding 9-14 and silently dropping anything outside it.
+const DEFAULT_MIN_HOUR = 9
+const DEFAULT_MAX_HOUR = 14
 
 function slotStartHour(slot: TimetableSlotDto) {
   return Number(slot.startTime.split(':')[0])
+}
+
+export function computeHourRange(slots: TimetableSlotDto[]): number[] {
+  const starts = slots.map(slotStartHour).filter((h) => Number.isFinite(h))
+  const minHour = Math.max(0, Math.min(DEFAULT_MIN_HOUR, ...starts))
+  const maxHour = Math.min(23, Math.max(DEFAULT_MAX_HOUR, ...starts))
+  const hours: number[] = []
+  for (let h = minHour; h <= maxHour; h++) hours.push(h)
+  return hours
 }
 
 interface CalendarGridProps {
@@ -17,6 +33,8 @@ interface CalendarGridProps {
 // (dayOfWeek, startTime). Events/todos aren't rendered here — this is the Timetable
 // engine's own grid (TWA-10/AWA-01-03), a different screen from the Student Calendar.
 export function CalendarGrid({ slots, onSlotClick }: CalendarGridProps) {
+  const hours = useMemo(() => computeHourRange(slots), [slots])
+
   return (
     <div className="overflow-x-auto rounded-lg border">
       <div className="grid min-w-[640px] grid-cols-[60px_repeat(5,1fr)]">
@@ -26,7 +44,7 @@ export function CalendarGrid({ slots, onSlotClick }: CalendarGridProps) {
             {day}
           </div>
         ))}
-        {HOURS.map((hour) => (
+        {hours.map((hour) => (
           <Fragment key={`row-${hour}`}>
             <div className="border-b border-r p-2 text-right text-xs text-muted-foreground">
               {hour}:00

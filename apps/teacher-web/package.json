@@ -14,6 +14,7 @@
   "dependencies": {
     "@campus/api-client": "file:../../packages/api-client",
     "@campus/direct-messaging": "file:../../packages/direct-messaging",
+    "@campus/shared-editor-kit": "file:../../packages/shared-editor-kit",
     "@tanstack/react-query": "^5.101.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

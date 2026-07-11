@@ -1,23 +1,50 @@
 import { useQuery } from '@tanstack/react-query'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { getWardRecord } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 
 export function RecordsPage() {
-  const { wardStudentId } = useAuth()
+  const { wardStudentId, setSession } = useAuth()
   const { data, isLoading, error } = useQuery({
     queryKey: ['ward-record', wardStudentId],
     queryFn: () => getWardRecord(wardStudentId!),
     enabled: !!wardStudentId,
   })
 
+  // #160 item 3 — a missing/corrupted wardStudentId disables the query entirely, so there's
+  // never a query error — falling through to `!data` would otherwise render as a false "no
+  // records" empty state instead of surfacing the real problem (see FeesPage for the same fix).
+  if (!wardStudentId) {
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-3 p-8">
+        <p className="text-sm text-destructive">
+          We couldn't find your linked student account. Please sign in again.
+        </p>
+        <Button variant="outline" className="self-start" onClick={() => setSession(null)}>
+          Sign in again
+        </Button>
+      </div>
+    )
+  }
+
   if (isLoading) return <p className="p-8 text-sm text-muted-foreground">Loading…</p>
-  if (error) return <p className="p-8 text-sm text-destructive">Could not load records.</p>
-  if (!data) return null
+
+  // #160 item 6 — a background refetch failure shouldn't blank out an already-loaded, valid
+  // view. Only show the hard error state when there's no data at all yet.
+  if (!data) {
+    if (error) return <p className="p-8 text-sm text-destructive">Could not load records.</p>
+    return null
+  }
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 p-8">
       <h1 className="text-xl font-semibold">{data.studentFullName}'s records</h1>
+      {error && (
+        <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+          Couldn't refresh — showing the last loaded data.
+        </p>
+      )}
 
       <Card>
         <CardHeader>

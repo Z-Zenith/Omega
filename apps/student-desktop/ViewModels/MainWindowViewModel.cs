@@ -27,6 +27,6 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private LoginViewModel CreateLoginPage() => new(_apiClient, response =>
     {
-        CurrentPage = new ShellViewModel(_apiClient, response.FullName, () => CurrentPage = CreateLoginPage(), AutoSubmitService);
+        CurrentPage = new ShellViewModel(_apiClient, response.UserId, response.FullName, () => CurrentPage = CreateLoginPage(), AutoSubmitService);
     });
 }

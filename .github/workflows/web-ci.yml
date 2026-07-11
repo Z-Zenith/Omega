@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -44,6 +47,14 @@ jobs:
       - name: Install shared package dependencies (api-client)
         run: npm ci
         working-directory: packages/api-client
+
+      # teacher-web consumes packages/shared-editor-kit via a `file:` dependency.
+      # Same reasoning as direct-messaging above: without this its own
+      # devDependencies are missing and the build fails to resolve them.
+      - name: Install shared package dependencies (shared-editor-kit)
+        if: matrix.app == 'teacher-web'
+        run: npm ci
+        working-directory: packages/shared-editor-kit
 
       - name: Lint
         run: npm run lint

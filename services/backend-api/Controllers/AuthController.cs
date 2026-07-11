@@ -26,10 +26,27 @@ public class AuthController(
     [EnableRateLimiting(RateLimiterPolicies.Auth)]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
     {
-        var user = await db.Users
+        // Identifier is only unique per (college_id, identifier) - see users_college_id_identifier_key
+        // - not globally, so a roll number/username can legitimately collide across colleges
+        // (#151). Fail closed on ambiguity rather than deterministically picking one match
+        // (e.g. oldest by CreatedAt): silently authenticating against the wrong college's
+        // account would fail the password check against the wrong hash and permanently lock
+        // that user out with a misleading "invalid password" error. Mirrors the same
+        // fail-closed pattern already used in ParentController.Login.
+        var matchingUsers = await db.Users
             .Where(u => u.Identifier == request.Identifier)
-            .OrderBy(u => u.CreatedAt)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
+
+        if (matchingUsers.Count > 1)
+        {
+            return Unauthorized(new
+            {
+                error = "identifier_ambiguous",
+                message = "This roll number/username exists at more than one institution. Contact your institution's admin to resolve this.",
+            });
+        }
+
+        var user = matchingUsers.SingleOrDefault();
 
         if (user is null)
         {
@@ -129,7 +146,27 @@ public class AuthController(
             return Unauthorized(new { error = "invalid_totp", message = "TOTP challenge failed." });
         }
 
+        // #140: same minimum strength policy as account creation and admin-initiated reset.
+        if (!PasswordPolicy.IsValid(request.NewPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
+        }
+
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+
+        // #132 — a password change must also cut off any session issued under the old
+        // password. Before this, only Login flipped old sessions to IsActive=false (on the
+        // *next* login); ChangePassword itself never touched UserSessions, so a JWT issued to
+        // an attacker who'd phished the old credentials+TOTP stayed valid for the rest of its
+        // ~60-minute lifetime even after the victim "fixed" it here. Mirrors Login's
+        // single-active-session flip, applied immediately rather than on next login — the
+        // caller already has the new password and can simply log back in.
+        var activeSessions = await db.UserSessions.Where(s => s.UserId == userId && s.IsActive).ToListAsync();
+        foreach (var session in activeSessions)
+        {
+            session.IsActive = false;
+        }
+
         await db.SaveChangesAsync();
         return NoContent();
     }

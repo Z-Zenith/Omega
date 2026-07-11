@@ -1,9 +1,12 @@
+using System.Net;
 using System.Text;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
 using BackendApi.Hubs;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -21,6 +24,20 @@ builder.Services.AddOpenApi();
 var connectionString = builder.Configuration.GetConnectionString("Campus")
     ?? throw new InvalidOperationException("Missing ConnectionStrings:Campus configuration.");
 
+// Same fail-fast shape as Jwt:Key below (#137): the committed appsettings.json value is a
+// dev-only placeholder (campus_dev on localhost). Unlike Jwt:Key, a missing override here
+// wasn't previously distinguishable from a deliberately-configured dev DB — if
+// ASPNETCORE_ENVIRONMENT=Production is set without also overriding ConnectionStrings__Campus,
+// the app would otherwise start up fine and silently point at the dev database.
+const string DevConnectionStringPlaceholder =
+    "Host=localhost;Port=5432;Database=campus;Username=campus;Password=campus_dev";
+if (!builder.Environment.IsDevelopment() && connectionString == DevConnectionStringPlaceholder)
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:Campus is still the committed dev-only placeholder from appsettings.json. " +
+        "Set the ConnectionStrings__Campus environment variable before starting in a non-Development environment.");
+}
+
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString, npgsqlOptions =>
 {
     npgsqlOptions
@@ -35,12 +52,30 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connect
         .MapEnum<WhitelistRequestStatus>();
 }));
 
+// #131: TOTP secrets are encrypted at rest via Data Protection (see TotpService). Keys must
+// be persisted outside the container's ephemeral filesystem or every restart/redeploy would
+// make every existing encrypted TotpSecret unreadable, locking every user out of login.
+// DOTNET_RUNNING_IN_CONTAINER is set by the official .NET base images, so this defaults to
+// the volume-mounted /keys path in Docker (see docker-compose.yml) and to a local folder
+// next to the build output otherwise (bare `dotnet run`, tests, etc.).
+var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
+    ?? (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true"
+        ? "/keys"
+        : Path.Combine(AppContext.BaseDirectory, "keys"));
+builder.Services.AddDataProtection()
+    .SetApplicationName("Campus.BackendApi")
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+
 builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<ITotpService, TotpService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
+builder.Services.AddScoped<ISessionActivityService, SessionActivityService>();
 builder.Services.AddScoped<SessionActiveFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
+// #134: per-roll-number login lockout must be shared across requests, not per-scope/request.
+builder.Services.AddSingleton<ParentLoginLockoutService>();
+builder.Services.AddScoped<ICollegeScopeService, CollegeScopeService>();
 // Notification Router (shared) — see Services/INotificationRouter.cs.
 builder.Services.AddScoped<INotificationRouter, NotificationRouter>();
 builder.Services.AddSignalR();
@@ -106,6 +141,30 @@ builder.Services.AddAuthorization();
 // so it doesn't throttle normal authenticated traffic.
 builder.Services.AddRateLimiter(RateLimiterPolicies.ConfigureAuth);
 
+// #141: RateLimiterPolicies partitions on httpContext.Connection.RemoteIpAddress, which is
+// only the real client IP when backend-api receives connections directly — true today (no
+// reverse proxy in this repo's compose setup). ForwardedHeadersMiddleware is only registered
+// (and only trusts X-Forwarded-For/-Proto) when TrustedProxies is explicitly configured, so
+// this is a no-op — and doesn't change today's behavior at all — until someone deliberately
+// puts a known proxy in front and configures it here. Trusting those headers from an
+// unconfigured/unknown source would let any client spoof its own rate-limiter partition key.
+var trustedProxies = builder.Configuration.GetSection("TrustedProxies").Get<string[]>() ?? [];
+if (trustedProxies.Length > 0)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.KnownProxies.Clear();
+        foreach (var proxy in trustedProxies)
+        {
+            if (IPAddress.TryParse(proxy, out var ip))
+            {
+                options.KnownProxies.Add(ip);
+            }
+        }
+    });
+}
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -113,6 +172,28 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
+if (trustedProxies.Length > 0)
+{
+    app.UseForwardedHeaders();
+}
+
+// #141: no HSTS/security headers existed at all. HSTS only applies outside Development so a
+// local dev cert/http workflow isn't broken. This is a JSON API with no HTML to render, so
+// the CSP is intentionally the strictest "deny everything" policy rather than a page-specific
+// one.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("Content-Security-Policy", "default-src 'none'");
+    await next();
+});
 
 app.UseHttpsRedirection();
 

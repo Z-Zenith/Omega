@@ -55,6 +55,10 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE TABLE IF NOT EXISTS colleges (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name        text NOT NULL,
+    -- IANA time zone name (e.g. 'Asia/Kolkata'), used to derive "today"/session dates from
+    -- this college's local time rather than raw UTC (#152) -- attendance marking and fee
+    -- due-date checks must not roll over to the wrong calendar day near local midnight.
+    time_zone   text NOT NULL DEFAULT 'UTC',
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
@@ -276,10 +280,18 @@ CREATE TABLE IF NOT EXISTS ai_detection_reports (
     checked_at          timestamptz NOT NULL DEFAULT now()
 );
 
+-- 2026-07-09 (#91): added confidence/matched_criteria/feedback so AIS-04's advisory
+-- signal ("never rubber-stamp, always show confidence") has somewhere to land — see
+-- services/ai-services/src/autograde.py's AutogradeSuggestion TypedDict for the shape
+-- these mirror. Additive only; no existing column touched. DB SCHEMA CONTRACT CHANGE —
+-- requires Track 1/Track 2 sign-off per CLAUDE.md before merge.
 CREATE TABLE IF NOT EXISTS autograde_suggestions (
     id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     submission_id          uuid NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
     suggested_grade        numeric NOT NULL,
+    confidence             numeric,
+    matched_criteria       jsonb,
+    feedback               jsonb,
     confirmed_by_teacher   boolean NOT NULL DEFAULT false,
     confirmed_at           timestamptz
 );

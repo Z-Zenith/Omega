@@ -14,7 +14,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class CommunityController(AppDbContext db, IPermissionService permissions) : ControllerBase
+public class CommunityController(AppDbContext db, IPermissionService permissions, IConfiguration configuration) : ControllerBase
 {
     // TWA-05, AWA-12. The auto-provisioned class group (API-02) is not created through
     // this endpoint — GroupType.Class is reserved for that automation, so a caller can't
@@ -63,6 +63,23 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         await db.SaveChangesAsync();
 
         return Ok(ToDto(group));
+    }
+
+    // AWA-06: "no group is excluded from Admin's view regardless of who created it" —
+    // institution-wide, not scoped to the caller's own college the way most other
+    // reads are (Lecturer/HoD/Admin all hold view_all_groups; in practice only Admin's
+    // "institution" is meaningfully broader than a teacher's own membership list).
+    [HttpGet("groups")]
+    public async Task<ActionResult<MyGroupsResponse>> AllGroups()
+    {
+        var userId = CurrentUserId();
+        if (!await permissions.HasPermissionAsync(userId, "view_all_groups"))
+        {
+            return Forbid();
+        }
+
+        var groups = await db.Groups.ToListAsync();
+        return Ok(new MyGroupsResponse(groups.Select(ToDto).ToList()));
     }
 
     // SDA-16
@@ -117,6 +134,48 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         return Ok(new GroupPostDto(post.Id, post.GroupId, post.AuthorId, post.Content, post.CreatedAt));
     }
 
+    // TWA-05, SDA-16: "view and post in groups they belong to" requires a way to actually
+    // list what's been posted — CreatePost alone can't satisfy that acceptance criterion.
+    [HttpGet("groups/{id}/posts")]
+    public async Task<ActionResult<List<GroupPostDto>>> ListPosts(Guid id)
+    {
+        var userId = CurrentUserId();
+        var isMember = await db.GroupMembers.AnyAsync(m => m.GroupId == id && m.UserId == userId);
+        if (!isMember)
+        {
+            return Forbid();
+        }
+
+        var posts = await db.GroupPosts
+            .Where(p => p.GroupId == id)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new GroupPostDto(p.Id, p.GroupId, p.AuthorId, p.Content, p.CreatedAt))
+            .ToListAsync();
+
+        return Ok(posts);
+    }
+
+    // SDA-16: "shall surface any material shared in a group inside that group's Materials
+    // section... without a separate upload step" — this is that surface, reading straight
+    // off the same Material rows TWA-06's upload endpoint writes (GroupId set).
+    [HttpGet("groups/{id}/materials")]
+    public async Task<ActionResult<List<MaterialDto>>> ListGroupMaterials(Guid id)
+    {
+        var userId = CurrentUserId();
+        var isMember = await db.GroupMembers.AnyAsync(m => m.GroupId == id && m.UserId == userId);
+        if (!isMember)
+        {
+            return Forbid();
+        }
+
+        var materials = await db.Materials
+            .Where(m => m.GroupId == id)
+            .OrderByDescending(m => m.UploadedAt)
+            .ToListAsync();
+
+        return Ok(materials.Select(ToDto).ToList());
+    }
+
     // TWA-06. Gated by AccountType rather than a permission code — no "upload_material"
     // code exists in the seeded catalog, and adding one is an OpenFGA/permission-catalog
     // contract change that needs separate sign-off (CLAUDE.md contract-change rule).
@@ -140,6 +199,12 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
         if (!TryValidateUrl(request.FileUrl))
         {
             return BadRequest(new { error = "invalid_url", message = "fileUrl must be an absolute http:// or https:// address." });
+        }
+        // #136: reject an off-platform FileUrl at upload time too, not just at download —
+        // fail fast rather than storing a link that DownloadMaterial will refuse later anyway.
+        if (!MaterialUrlPolicy.IsAllowedHost(request.FileUrl, AllowedMaterialHosts))
+        {
+            return BadRequest(new { error = "disallowed_host", message = "fileUrl must point at an approved storage/CDN host." });
         }
         if (request.SubjectId is null && request.GroupId is null)
         {
@@ -194,8 +259,23 @@ public class CommunityController(AppDbContext db, IPermissionService permissions
             return Forbid();
         }
 
+        // #136: defense in depth — UploadMaterial already rejects a disallowed host, but this
+        // re-check ensures a row written before the allowlist existed (or by any other path)
+        // can never turn this endpoint into an open redirect to an arbitrary external site.
+        if (!MaterialUrlPolicy.IsAllowedHost(material.FileUrl, AllowedMaterialHosts))
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                error = "disallowed_host",
+                message = "This material's file host is not on the approved list; contact an administrator.",
+            });
+        }
+
         return Redirect(material.FileUrl);
     }
+
+    private string[] AllowedMaterialHosts =>
+        configuration.GetSection("MaterialStorage:AllowedHosts").Get<string[]>() ?? [];
 
     private async Task<bool> CanViewMaterialAsync(Material material, User caller)
     {

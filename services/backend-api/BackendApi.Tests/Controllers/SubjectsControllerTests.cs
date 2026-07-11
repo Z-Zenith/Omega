@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace BackendApi.Tests;
+namespace BackendApi.Tests.Controllers;
 
 public class SubjectsControllerTests
 {
@@ -174,5 +174,48 @@ public class SubjectsControllerTests
         Assert.Equal(2, subjects.Count);
         Assert.Contains(subjects, s => s.TeacherId == firstTeacher.Id);
         Assert.Contains(subjects, s => s.TeacherId == secondTeacher.Id);
+    }
+
+    // #159: a student enrolled in two different sections that both teach the same subject
+    // (with Subject.TeacherId set as the canonical teacher) via different
+    // TeacherSectionAssignment-level teachers used to see the subject listed twice, because
+    // the old Distinct() ran before the SubjectTeacherId ?? AssignmentTeacherId fallback
+    // collapsed the rows to an identical final DTO.
+    [Fact]
+    public async Task Issue159_Mine_CollapsesSameSubjectAcrossTwoSections_WhenCanonicalTeacherIsSet()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+
+        var canonicalTeacher = NewUser(AccountType.Teacher);
+        var otherAssignmentTeacher = NewUser(AccountType.Teacher);
+        db.Users.AddRange(canonicalTeacher, otherAssignmentTeacher);
+
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = Guid.NewGuid(), Code = "CS401", Name = "Distributed Systems", TeacherId = canonicalTeacher.Id };
+        db.Subjects.Add(subject);
+
+        var firstSection = new Section { Id = Guid.NewGuid(), DepartmentId = Guid.NewGuid(), Year = 4, Name = "4th Year CSE - A" };
+        var secondSection = new Section { Id = Guid.NewGuid(), DepartmentId = Guid.NewGuid(), Year = 4, Name = "4th Year CSE - B" };
+        db.Sections.AddRange(firstSection, secondSection);
+
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = firstSection.Id, StudentId = student.Id });
+        db.SectionEnrollments.Add(new SectionEnrollment { Id = Guid.NewGuid(), SectionId = secondSection.Id, StudentId = student.Id });
+
+        // Two assignment rows for the same subject, via two different sections and two
+        // different assignment-level teachers — but Subject.TeacherId (canonical) is the
+        // same for both, so after the fallback both collapse to one final teacher.
+        db.TeacherSectionAssignments.Add(new TeacherSectionAssignment { Id = Guid.NewGuid(), TeacherId = canonicalTeacher.Id, SectionId = firstSection.Id, SubjectId = subject.Id });
+        db.TeacherSectionAssignments.Add(new TeacherSectionAssignment { Id = Guid.NewGuid(), TeacherId = otherAssignmentTeacher.Id, SectionId = secondSection.Id, SubjectId = subject.Id });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.Mine();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var subjects = Assert.IsType<List<MySubjectDto>>(ok.Value);
+        var entry = Assert.Single(subjects);
+        Assert.Equal(subject.Id, entry.SubjectId);
+        Assert.Equal(canonicalTeacher.Id, entry.TeacherId);
     }
 }

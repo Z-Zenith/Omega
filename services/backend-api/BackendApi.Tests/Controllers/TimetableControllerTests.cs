@@ -7,6 +7,8 @@ using BackendApi.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace BackendApi.Tests;
 
@@ -19,6 +21,38 @@ public class TimetableControllerTests
     {
         public Task<bool> HasPermissionAsync(Guid userId, string permissionCode) => Task.FromResult(false);
         public Task<Guid?> GetDepartmentScopeAsync(Guid userId) => Task.FromResult<Guid?>(null);
+    }
+
+    // #159: Generate() gates on "create_timetable" — a variant of the fake above that
+    // grants it, for tests that need to actually exercise Generate().
+    private class AllowingPermissionService : IPermissionService
+    {
+        public Task<bool> HasPermissionAsync(Guid userId, string permissionCode) => Task.FromResult(permissionCode == "create_timetable");
+        public Task<Guid?> GetDepartmentScopeAsync(Guid userId) => Task.FromResult<Guid?>(null);
+    }
+
+    // #159: records LogWarning calls so tests can assert Generate() surfaces skipped
+    // "already covered" assignments instead of silently dropping them.
+    private class RecordingLogger : ILogger<TimetableController>
+    {
+        public List<string> Warnings { get; } = [];
+
+        IDisposable ILogger.BeginScope<TState>(TState state) => NullScope.Instance;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                Warnings.Add(formatter(state, exception));
+            }
+        }
+
+        private sealed class NullScope : IDisposable
+        {
+            public static readonly NullScope Instance = new();
+            public void Dispose() { }
+        }
     }
 
     // SDA-12: no test in this file exercises ExitPing's notification-routing behavior
@@ -53,11 +87,11 @@ public class TimetableControllerTests
 
     private static Section NewSection(Guid departmentId) => new() { Id = Guid.NewGuid(), DepartmentId = departmentId, Year = 1, Name = "CS-A" };
 
-    private static TimetableController ControllerAs(AppDbContext db, User user)
+    private static TimetableController ControllerAs(AppDbContext db, User user, IPermissionService? permissions = null, ILogger<TimetableController>? logger = null)
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
-        return new TimetableController(db, new FakePermissionService(), new FakeNotificationRouter())
+        return new TimetableController(db, permissions ?? new FakePermissionService(), new FakeNotificationRouter(), new CollegeScopeService(db), logger ?? NullLogger<TimetableController>.Instance)
         {
             ControllerContext = new ControllerContext
             {
@@ -328,6 +362,28 @@ public class TimetableControllerTests
         }
     }
 
+    // #152 — when SessionDate is omitted, the session date must be derived from the
+    // teacher's college's local time zone (via CollegeClock), not raw UTC, so marking
+    // attendance near local midnight doesn't roll over to the wrong calendar day.
+    [Fact]
+    public async Task Twa08_MarkAttendance_DefaultsSessionDateFromCollegeTimeZone_NotRawUtc()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var college = new College { Id = teacher.CollegeId, Name = "Kiritimati Campus", TimeZone = "Pacific/Kiritimati" };
+        db.Colleges.Add(college);
+        var fixture = await SeedSectionAsync(db, teacher, studentCount: 1);
+
+        var controller = ControllerAs(db, teacher);
+        var entries = new List<AttendanceEntryRequest> { new(fixture.Students[0].Id, "Present") };
+        var result = await controller.MarkAttendance(new MarkAttendanceRequest(fixture.Slot.Id, null, entries));
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var session = await db.ClassSessions.SingleAsync(s => s.TimetableSlotId == fixture.Slot.Id);
+        var expectedDate = CollegeClock.LocalDate(college, DateTime.UtcNow);
+        Assert.Equal(expectedDate, session.SessionDate);
+    }
+
     // TWA-08
     [Fact]
     public async Task Twa08_Roster_ReturnsEnrolledStudentsForOwnSlot()
@@ -571,5 +627,126 @@ public class TimetableControllerTests
         var summary = Assert.IsType<SectionPerformanceSummaryDto>(ok.Value);
         Assert.Null(summary.OverallAttendancePercentage);
         Assert.Null(summary.MarksBySubject.Single().AverageMarks);
+    }
+
+    // #159: a stale/duplicate TeacherSectionAssignment row for the same (Section, Subject)
+    // pair already covered by a manually-edited slot used to be dropped with no error
+    // surfaced anywhere. Generate() must now log which assignment(s) were skipped as
+    // "already covered", without changing the (Section, Subject) dedup key itself.
+    [Fact]
+    public async Task Issue159_Generate_LogsAssignmentsSkippedAsAlreadyCovered()
+    {
+        await using var db = NewDb();
+        var coveringTeacher = NewUser(AccountType.Teacher);
+        var duplicateTeacher = NewUser(AccountType.Teacher);
+        // #129: Generate() (global, non-HoD caller) now rejects a requested DepartmentId
+        // belonging to a different college than the caller's own - match them here since this
+        // test is about the #159 skip-logging behavior, not #129's cross-college guard.
+        var department = new Department { Id = Guid.NewGuid(), CollegeId = coveringTeacher.CollegeId, Name = "CS" };
+        var section = NewSection(department.Id);
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS201", Name = "Data Structures" };
+        db.Departments.Add(department);
+        db.Sections.Add(section);
+        db.Subjects.Add(subject);
+        db.Users.AddRange(coveringTeacher, duplicateTeacher);
+
+        // A manually-edited slot already covers (section, subject) for coveringTeacher.
+        db.TimetableSlots.Add(new TimetableSlot
+        {
+            Id = Guid.NewGuid(),
+            SectionId = section.Id,
+            SubjectId = subject.Id,
+            TeacherId = coveringTeacher.Id,
+            DayOfWeek = 1,
+            StartTime = new TimeOnly(9, 0),
+            EndTime = new TimeOnly(10, 0),
+            ManuallyEdited = true,
+        });
+
+        // A stale/duplicate assignment row for the same (section, subject) but a different
+        // teacher — this is the one that gets silently skipped today.
+        db.TeacherSectionAssignments.Add(new TeacherSectionAssignment { Id = Guid.NewGuid(), TeacherId = duplicateTeacher.Id, SectionId = section.Id, SubjectId = subject.Id });
+        await db.SaveChangesAsync();
+
+        var recordingLogger = new RecordingLogger();
+        var controller = ControllerAs(db, coveringTeacher, permissions: new AllowingPermissionService(), logger: recordingLogger);
+
+        var result = await controller.Generate(new GenerateTimetableRequest(department.Id));
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Contains(recordingLogger.Warnings, w => w.Contains(duplicateTeacher.Id.ToString()) && w.Contains("already covered"));
+        // No new auto-generated slot was created for the duplicate assignment — only the
+        // pre-existing manually-edited slot remains.
+        var slots = await db.TimetableSlots.Where(s => s.SectionId == section.Id).ToListAsync();
+        Assert.Single(slots);
+    }
+
+    // A global (non-HoD) create_timetable holder — GetDepartmentScopeAsync returns null,
+    // same as an Admin's binding with no "hod" role.
+    private class FakeGlobalTimetablePermissionService : IPermissionService
+    {
+        public Task<bool> HasPermissionAsync(Guid userId, string permissionCode) => Task.FromResult(permissionCode == "create_timetable");
+        public Task<Guid?> GetDepartmentScopeAsync(Guid userId) => Task.FromResult<Guid?>(null);
+    }
+
+    private static TimetableController GlobalCallerController(AppDbContext db, User caller)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, caller.Id.ToString())], "TestAuth"));
+        return new TimetableController(db, new FakeGlobalTimetablePermissionService(), new FakeNotificationRouter(), new CollegeScopeService(db), NullLogger<TimetableController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = principal } },
+        };
+    }
+
+    // #129 — PatchSlot's HoD-scope guard previously only ran when departmentScope was
+    // non-null, so a global create_timetable holder could patch any slot in any college by
+    // guessing/enumerating slot ids.
+    [Fact]
+    public async Task PatchSlot_ForbidsGlobalCallerFromCrossCollegeSlot()
+    {
+        await using var db = NewDb();
+        var caller = NewUser(AccountType.AdminTier);
+        var otherCollegeDepartment = NewDepartment(); // random CollegeId, different from caller's
+        var section = NewSection(otherCollegeDepartment.Id);
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = otherCollegeDepartment.Id, Code = "CS101", Name = "Intro" };
+        var slotTeacher = NewUser(AccountType.Teacher);
+        var slot = new TimetableSlot { Id = Guid.NewGuid(), SectionId = section.Id, SubjectId = subject.Id, TeacherId = slotTeacher.Id, DayOfWeek = 1, StartTime = new TimeOnly(9, 0), EndTime = new TimeOnly(10, 0) };
+        db.Users.AddRange(caller, slotTeacher);
+        db.Departments.Add(otherCollegeDepartment);
+        db.Sections.Add(section);
+        db.Subjects.Add(subject);
+        db.TimetableSlots.Add(slot);
+        await db.SaveChangesAsync();
+
+        var controller = GlobalCallerController(db, caller);
+        var result = await controller.PatchSlot(slot.Id, new PatchSlotRequest(null, null, null, null, null));
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task PatchSlot_AllowsGlobalCallerToPatchSameCollegeSlot()
+    {
+        await using var db = NewDb();
+        var caller = NewUser(AccountType.AdminTier);
+        var department = new Department { Id = Guid.NewGuid(), Name = "CS", CollegeId = caller.CollegeId };
+        var section = NewSection(department.Id);
+        var subject = new Subject { Id = Guid.NewGuid(), DepartmentId = department.Id, Code = "CS101", Name = "Intro" };
+        var slotTeacher = NewUser(AccountType.Teacher);
+        var slot = new TimetableSlot { Id = Guid.NewGuid(), SectionId = section.Id, SubjectId = subject.Id, TeacherId = slotTeacher.Id, DayOfWeek = 1, StartTime = new TimeOnly(9, 0), EndTime = new TimeOnly(10, 0) };
+        db.Users.AddRange(caller, slotTeacher);
+        db.Departments.Add(department);
+        db.Sections.Add(section);
+        db.Subjects.Add(subject);
+        db.TimetableSlots.Add(slot);
+        await db.SaveChangesAsync();
+
+        var controller = GlobalCallerController(db, caller);
+        var result = await controller.PatchSlot(slot.Id, new PatchSlotRequest(null, 3, null, null, "Room 5"));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TimetableSlotDto>(ok.Value);
+        Assert.Equal(3, dto.DayOfWeek);
     }
 }
