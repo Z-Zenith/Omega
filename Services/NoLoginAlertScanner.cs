@@ -49,8 +49,14 @@ public static class NoLoginAlertScanner
                 continue;
             }
 
+            // #159: this used to be `CreatedAt >= sessionStart`, which only recognizes a
+            // session created at-or-after the class started. A student who logged in the
+            // evening before and never logged out has a still-open (IsActive) session with
+            // an earlier CreatedAt — that's a legitimate login covering this class window,
+            // not a no-login. Count a session as "logged in for this class" if it was either
+            // created during/after the window, or is still active from before it.
             var hasLoggedIn = await db.UserSessions
-                .AnyAsync(s => s.UserId == record.StudentId && s.CreatedAt >= sessionStart, cancellationToken);
+                .AnyAsync(s => s.UserId == record.StudentId && (s.CreatedAt >= sessionStart || s.IsActive), cancellationToken);
             if (hasLoggedIn)
             {
                 continue;
