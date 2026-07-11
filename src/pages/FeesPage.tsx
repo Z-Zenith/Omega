@@ -6,7 +6,7 @@ import { ApiError, getWardFees, payFee } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 
 export function FeesPage() {
-  const { wardStudentId } = useAuth()
+  const { wardStudentId, setSession } = useAuth()
   const queryClient = useQueryClient()
   const [payingId, setPayingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -30,17 +30,44 @@ export function FeesPage() {
     }
   }
 
+  // #160 item 3 — a missing/corrupted wardStudentId (e.g. malformed localStorage) disables
+  // the query entirely, so there's never a query error — `data ?? []` would otherwise render
+  // as a false "No fee records yet." empty-state instead of surfacing the real problem.
+  if (!wardStudentId) {
+    return (
+      <div className="mx-auto flex max-w-3xl flex-col gap-3 p-8">
+        <p className="text-sm text-destructive">
+          We couldn't find your linked student account. Please sign in again.
+        </p>
+        <Button variant="outline" className="self-start" onClick={() => setSession(null)}>
+          Sign in again
+        </Button>
+      </div>
+    )
+  }
+
   if (isLoading) return <p className="p-8 text-sm text-muted-foreground">Loading…</p>
-  if (loadError) return <p className="p-8 text-sm text-destructive">Could not load fees.</p>
+
+  // #160 item 6 — a background refetch failure shouldn't blank out an already-loaded, valid
+  // view. Only show the hard error state when there's no data at all yet.
+  if (!data) {
+    if (loadError) return <p className="p-8 text-sm text-destructive">Could not load fees.</p>
+    return null
+  }
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-8">
       <h1 className="text-xl font-semibold">Fees</h1>
+      {loadError && (
+        <p className="rounded-md bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
+          Couldn't refresh — showing the last loaded data.
+        </p>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {(data ?? []).length === 0 ? (
+      {data.length === 0 ? (
         <p className="text-sm text-muted-foreground">No fee records yet.</p>
       ) : (
-        data!.map((fee) => (
+        data.map((fee) => (
           <Card key={fee.id}>
             <CardHeader>
               <CardTitle className="flex items-center justify-between text-base">
