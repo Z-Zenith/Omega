@@ -24,7 +24,13 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 // AWA-13: the JWT only carries account_type (e.g. "AdminTier"), not the specific role_code
 // (admin/it/hod/finance all share that account_type), so "only Admin/IT see this" is enforced
 // by asking the already permission-gated backend rather than inspecting a client-side claim.
-function useCanManageRoles() {
+//
+// Three states, not two: while the query is in flight, "not yet errored" must NOT be treated
+// as "allowed" — that previously let any authenticated user briefly see the Roles page/nav
+// link before the permission check resolved to 403 and redirected them away.
+type RoleManagementAccess = 'checking' | 'allowed' | 'denied'
+
+function useCanManageRoles(): RoleManagementAccess {
   const { token } = useAuth()
   const query = useQuery({
     queryKey: ['role-bindings'],
@@ -32,12 +38,16 @@ function useCanManageRoles() {
     enabled: !!token,
     retry: false,
   })
-  return !query.isError
+  if (!token) return 'denied'
+  if (query.isSuccess) return 'allowed'
+  if (query.isError) return 'denied'
+  return 'checking'
 }
 
-function RequireRoleManagement({ children }: { children: React.ReactNode }) {
+export function RequireRoleManagement({ children }: { children: React.ReactNode }) {
   const canManageRoles = useCanManageRoles()
-  if (!canManageRoles) return <Navigate to="/timetable" replace />
+  if (canManageRoles === 'checking') return null
+  if (canManageRoles === 'denied') return <Navigate to="/timetable" replace />
   return children
 }
 
@@ -53,7 +63,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <Link to="/departments">Departments</Link>
           <Link to="/reports">Reports</Link>
           <Link to="/password-reset">Password Reset</Link>
-          {canManageRoles && <Link to="/roles">Roles & Permissions</Link>}
+          {canManageRoles === 'allowed' && <Link to="/roles">Roles & Permissions</Link>}
           <Link to="/accounts/new">Create account</Link>
           <Link to="/groups/new">Create group</Link>
           <Link to="/students">Student Records</Link>
