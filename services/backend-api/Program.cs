@@ -22,6 +22,20 @@ builder.Services.AddOpenApi();
 var connectionString = builder.Configuration.GetConnectionString("Campus")
     ?? throw new InvalidOperationException("Missing ConnectionStrings:Campus configuration.");
 
+// Same fail-fast shape as Jwt:Key below (#137): the committed appsettings.json value is a
+// dev-only placeholder (campus_dev on localhost). Unlike Jwt:Key, a missing override here
+// wasn't previously distinguishable from a deliberately-configured dev DB — if
+// ASPNETCORE_ENVIRONMENT=Production is set without also overriding ConnectionStrings__Campus,
+// the app would otherwise start up fine and silently point at the dev database.
+const string DevConnectionStringPlaceholder =
+    "Host=localhost;Port=5432;Database=campus;Username=campus;Password=campus_dev";
+if (!builder.Environment.IsDevelopment() && connectionString == DevConnectionStringPlaceholder)
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:Campus is still the committed dev-only placeholder from appsettings.json. " +
+        "Set the ConnectionStrings__Campus environment variable before starting in a non-Development environment.");
+}
+
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString, npgsqlOptions =>
 {
     npgsqlOptions
