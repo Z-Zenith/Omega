@@ -30,6 +30,13 @@ public class CalendarController(AppDbContext db, IPermissionService permissions)
             return Unauthorized();
         }
 
+        // #159: nothing previously rejected EndTime <= StartTime — a zero-or-negative-length
+        // event silently persisted and would render nonsensically on any calendar view.
+        if (request.EndTime <= request.StartTime)
+        {
+            return BadRequest(new { error = "invalid_time_range", message = "EndTime must be after StartTime." });
+        }
+
         var newEvent = new Event
         {
             Id = Guid.NewGuid(),
