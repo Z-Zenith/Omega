@@ -141,6 +141,18 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         }
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+
+        // #132 — an admin-initiated reset must also cut off any session issued under the old
+        // password (often the exact reason the reset is being done — a phished/compromised
+        // account). Without this, the target's existing JWT/session stayed valid for the rest
+        // of its ~60-minute lifetime regardless of the reset. Mirrors the single-active-session
+        // flip Login performs on the target user's *next* login.
+        var activeSessions = await db.UserSessions.Where(s => s.UserId == id && s.IsActive).ToListAsync();
+        foreach (var session in activeSessions)
+        {
+            session.IsActive = false;
+        }
+
         await db.SaveChangesAsync();
         return NoContent();
     }
