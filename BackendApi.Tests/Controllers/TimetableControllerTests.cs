@@ -749,4 +749,57 @@ public class TimetableControllerTests
         var dto = Assert.IsType<TimetableSlotDto>(ok.Value);
         Assert.Equal(3, dto.DayOfWeek);
     }
+
+    // TWA-13 + Notification Router (shared, #80) — requesting a timetable change routes a
+    // TimetableRequest notification to every Admin in the requesting teacher's own college.
+    private class RecordingNotificationRouter : INotificationRouter
+    {
+        public List<(Guid RecipientId, NotificationType Type)> Routed { get; } = new();
+
+        public Task<Notification> RouteAsync(Guid recipientId, NotificationType type, object payload, CancellationToken cancellationToken = default)
+        {
+            Routed.Add((recipientId, type));
+            return Task.FromResult(new Notification { Id = Guid.NewGuid(), RecipientId = recipientId, Type = type });
+        }
+    }
+
+    private static TimetableController ControllerAs(AppDbContext db, User user, INotificationRouter notifications)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
+        return new TimetableController(db, new FakePermissionService(), notifications)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = principal },
+            },
+        };
+    }
+
+    [Fact]
+    public async Task Twa13_CreateChangeRequest_NotifiesEveryAdminInTheTeachersCollege()
+    {
+        await using var db = NewDb();
+        var collegeId = Guid.NewGuid();
+        var teacher = NewUser(AccountType.Teacher);
+        teacher.CollegeId = collegeId;
+        var admin = NewUser(AccountType.AdminTier);
+        admin.CollegeId = collegeId;
+        var otherCollegeAdmin = NewUser(AccountType.AdminTier);
+        db.Users.AddRange(teacher, admin, otherCollegeAdmin);
+        db.RoleBindings.AddRange(
+            new RoleBinding { Id = Guid.NewGuid(), UserId = admin.Id, RoleCode = "admin", GrantedAt = DateTime.UtcNow },
+            new RoleBinding { Id = Guid.NewGuid(), UserId = otherCollegeAdmin.Id, RoleCode = "admin", GrantedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var router = new RecordingNotificationRouter();
+        var controller = ControllerAs(db, teacher, router);
+
+        var result = await controller.CreateChangeRequest(new CreateChangeRequestRequest("Move CS101 to a bigger room"));
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var routed = Assert.Single(router.Routed);
+        Assert.Equal(admin.Id, routed.RecipientId);
+        Assert.Equal(NotificationType.TimetableRequest, routed.Type);
+    }
 }
