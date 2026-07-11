@@ -43,6 +43,15 @@ export const MessageThreadView = forwardRef<MessageThreadViewApi, MessageThreadV
     };
 
     useEffect(() => {
+      // Reset all per-thread state synchronously before the async reload
+      // kicks off — otherwise the previous thread's unsent draft and message
+      // list stay visible (and sendable, to the *new* thread.id) until the
+      // fetch below resolves. See #154 (leaked draft) and #155 (stale
+      // messages).
+      setMessages([]);
+      setDraft('');
+      setError(null);
+      setSending(false);
       load();
       return () => {
         generationRef.current++;
