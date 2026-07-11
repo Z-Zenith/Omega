@@ -4,6 +4,20 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { createEvent, ApiError } from '@/lib/api'
 
+// #156 — an empty/blank segment must be dropped before Number() conversion, not after:
+// Number('') is 0, not NaN, so a blank "restrict to years" field (meant to mean "everyone")
+// or a trailing comma ("1,2,") would otherwise silently inject a spurious year 0 that no
+// section ever has, making the event invisible/unregisterable for anyone.
+export function parseRestrictedYears(input: string): number[] | null {
+  const years = input
+    .split(',')
+    .map((y) => y.trim())
+    .filter((y) => y.length > 0)
+    .map((y) => Number(y))
+    .filter((y) => !Number.isNaN(y))
+  return years.length ? years : null
+}
+
 export function EventsPage() {
   const [title, setTitle] = useState('')
   const [startTime, setStartTime] = useState('')
@@ -30,15 +44,11 @@ export function EventsPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const years = restrictedYears
-      .split(',')
-      .map((y) => Number(y.trim()))
-      .filter((y) => !Number.isNaN(y))
     createEventMutation.mutate({
       title,
       startTime: new Date(startTime).toISOString(),
       endTime: new Date(endTime).toISOString(),
-      restrictedYears: years.length ? years : null,
+      restrictedYears: parseRestrictedYears(restrictedYears),
       restrictedDepartments: null,
     })
   }
