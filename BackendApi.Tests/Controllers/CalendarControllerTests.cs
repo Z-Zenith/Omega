@@ -95,4 +95,29 @@ public class CalendarControllerTests
         Assert.IsType<EventDto>(ok.Value);
         Assert.Single(await db.Events.ToListAsync());
     }
+
+    // #159: an undated todo used to be mapped to DateTime.MinValue (0001-01-01), rendering
+    // as a ~2000-years-overdue calendar item. It should be omitted from the dated calendar
+    // instead.
+    [Fact]
+    public async Task Issue159_MyCalendar_OmitsUndatedTodos()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        db.Todos.Add(new Todo { Id = Guid.NewGuid(), StudentId = student.Id, Title = "No due date", DueDate = null });
+        var dated = new Todo { Id = Guid.NewGuid(), StudentId = student.Id, Title = "Has a due date", DueDate = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc) };
+        db.Todos.Add(dated);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.MyCalendar();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<MyCalendarResponse>(ok.Value);
+        var todoItems = response.Items.Where(i => i.Kind == "todo").ToList();
+        var item = Assert.Single(todoItems);
+        Assert.Equal(dated.Id, item.Id);
+        Assert.NotEqual(DateTime.MinValue, item.Start);
+    }
 }

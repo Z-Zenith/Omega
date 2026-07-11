@@ -127,9 +127,14 @@ public class CalendarController(AppDbContext db, IPermissionService permissions)
                 registeredEventIds.Contains(e.Id) ? "registered=true" : null)));
         }
 
-        var todos = await db.Todos.Where(t => t.StudentId == student.Id).ToListAsync();
+        // #159: an undated todo used to default to DateTime.MinValue (0001-01-01), which
+        // rendered as a ~2000-years-overdue item and broke any upcoming/overdue grouping on
+        // the client. Omit undated todos from the dated calendar entirely rather than giving
+        // them a fabricated date — there's no separate "undated" bucket in CalendarItemDto
+        // (adding one is a contract change), so skipping is the safe fix here.
+        var todos = await db.Todos.Where(t => t.StudentId == student.Id && t.DueDate != null).ToListAsync();
         items.AddRange(todos.Select(t => new CalendarItemDto(
-            "todo", t.Id, t.Title, t.DueDate ?? DateTime.MinValue, t.DueDate ?? DateTime.MinValue,
+            "todo", t.Id, t.Title, t.DueDate!.Value, t.DueDate!.Value,
             t.Completed ? "completed=true" : null)));
 
         var customEntries = await db.CustomCalendarEntries.Where(c => c.StudentId == student.Id).ToListAsync();
