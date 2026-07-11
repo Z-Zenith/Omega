@@ -68,6 +68,7 @@ builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<ITotpService, TotpService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<WardAccessFilter>();
+builder.Services.AddScoped<ISessionActivityService, SessionActivityService>();
 builder.Services.AddScoped<SessionActiveFilter>();
 builder.Services.AddScoped<IPermissionService, PermissionService>();
 builder.Services.AddScoped<ICollegeScopeService, CollegeScopeService>();

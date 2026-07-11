@@ -130,6 +130,20 @@ public class AuthController(
         }
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
+
+        // #132 — a password change must also cut off any session issued under the old
+        // password. Before this, only Login flipped old sessions to IsActive=false (on the
+        // *next* login); ChangePassword itself never touched UserSessions, so a JWT issued to
+        // an attacker who'd phished the old credentials+TOTP stayed valid for the rest of its
+        // ~60-minute lifetime even after the victim "fixed" it here. Mirrors Login's
+        // single-active-session flip, applied immediately rather than on next login — the
+        // caller already has the new password and can simply log back in.
+        var activeSessions = await db.UserSessions.Where(s => s.UserId == userId && s.IsActive).ToListAsync();
+        foreach (var session in activeSessions)
+        {
+            session.IsActive = false;
+        }
+
         await db.SaveChangesAsync();
         return NoContent();
     }

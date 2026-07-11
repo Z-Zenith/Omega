@@ -755,7 +755,8 @@ public partial class AppDbContext : DbContext
 
             // #92 — one user can have many historical (inactive) session rows; only the
             // partial unique index (is_active = true) enforces "one active session" at the
-            // DB level, so this must be a one-to-many, not one-to-one.
+            // DB level, so this must be a one-to-many, not one-to-one. Also load-bearing for
+            // #130/#132's session-revocation work.
             entity.HasOne(d => d.User).WithMany(p => p.UserSessions).HasConstraintName("user_sessions_user_id_fkey");
         });
 
