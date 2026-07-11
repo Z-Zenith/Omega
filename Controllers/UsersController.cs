@@ -35,6 +35,14 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
             return Forbid();
         }
 
+        // #140: enforce a minimum strength policy before hashing, same as ResetPassword and
+        // AuthController.ChangePassword — an account's very first password shouldn't be weaker
+        // than what every later password change requires.
+        if (!PasswordPolicy.IsValid(request.InitialPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
+        }
+
         var totpSecret = totpService.GenerateSecret();
 
         var user = new User
@@ -138,6 +146,12 @@ public class UsersController(AppDbContext db, IPasswordHasher passwordHasher, IT
         if (user is null)
         {
             return NotFound();
+        }
+
+        // #140: same minimum strength policy as account creation and self-service change.
+        if (!PasswordPolicy.IsValid(request.NewPassword, out var passwordError))
+        {
+            return BadRequest(new { error = "weak_password", message = passwordError });
         }
 
         user.PasswordHash = passwordHasher.Hash(request.NewPassword);
