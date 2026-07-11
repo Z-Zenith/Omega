@@ -187,7 +187,7 @@ export function getUserProfile(id: string) {
 export function resetUserPassword(id: string, newPassword: string) {
   return request<void>(`/users/${id}/reset-password`, {
     method: 'POST',
-    body: JSON.stringify(newPassword),
+    body: JSON.stringify({ newPassword }),
   })
 }
 

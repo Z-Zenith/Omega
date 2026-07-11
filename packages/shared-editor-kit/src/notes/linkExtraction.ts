@@ -37,3 +37,15 @@ export function extractOutgoingLinks(markdown: string): OutgoingLinks {
 
   return links;
 }
+
+/**
+ * #161 — a stable string key for a set of outgoing links' unique targets, independent
+ * of array/object identity. `extractOutgoingLinks` returns a new array reference on
+ * every call (e.g. once per keystroke in NotesEditor), which would otherwise cause a
+ * `useEffect` keyed on `[outgoingLinks]` to re-run — and re-resolve every link target
+ * over the network/IPC — on every keystroke even when the actual set of targets hasn't
+ * changed. Depending on this key instead lets that effect skip redundant re-runs.
+ */
+export function uniqueLinkTargetsKey(links: OutgoingLinks): string {
+  return [...new Set(links.map((link) => link.toNoteId))].sort().join(',');
+}
