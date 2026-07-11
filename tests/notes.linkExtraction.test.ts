@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 // Real .ts extension (not .js) so Node's native type-stripping can resolve
 // this import directly — see the allowImportingTsExtensions note in tsconfig.json.
-import { extractOutgoingLinks } from '../src/notes/linkExtraction.ts';
+import { extractOutgoingLinks, uniqueLinkTargetsKey } from '../src/notes/linkExtraction.ts';
 
 test('returns nothing for markdown with no links', () => {
   assert.deepEqual(extractOutgoingLinks('just plain text, no links here'), []);
@@ -71,4 +71,30 @@ test('repeated links to the same target are each returned', () => {
     { toNoteId: 'note-2', anchor: 'note-2' },
     { toNoteId: 'note-2', anchor: 'note-2' },
   ]);
+});
+
+// #161 — NotesEditor's link-resolution effect depends on this key instead of the
+// outgoingLinks array reference, so keystrokes that don't change the target set must
+// produce an identical key even though extractOutgoingLinks() itself returns a new array.
+test('uniqueLinkTargetsKey: identical for two different arrays with the same target set', () => {
+  const before = extractOutgoingLinks('see [[note-2]] and [[note-3]]');
+  const after = extractOutgoingLinks('see [[note-2]] and [[note-3]] plus more text');
+  assert.notEqual(before, after); // different array references, as extractOutgoingLinks always returns
+  assert.equal(uniqueLinkTargetsKey(before), uniqueLinkTargetsKey(after));
+});
+
+test('uniqueLinkTargetsKey: differs once a link target is actually added', () => {
+  const before = uniqueLinkTargetsKey(extractOutgoingLinks('[[note-2]]'));
+  const after = uniqueLinkTargetsKey(extractOutgoingLinks('[[note-2]] [[note-3]]'));
+  assert.notEqual(before, after);
+});
+
+test('uniqueLinkTargetsKey: order-independent and de-duplicates repeated targets', () => {
+  const key1 = uniqueLinkTargetsKey(extractOutgoingLinks('[[note-2]] [[note-3]]'));
+  const key2 = uniqueLinkTargetsKey(extractOutgoingLinks('[[note-3]] [[note-2]] [[note-2]]'));
+  assert.equal(key1, key2);
+});
+
+test('uniqueLinkTargetsKey: empty for no links', () => {
+  assert.equal(uniqueLinkTargetsKey([]), '');
 });
