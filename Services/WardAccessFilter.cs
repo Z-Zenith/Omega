@@ -20,7 +20,12 @@ public class WardAccessFilter(AppDbContext db) : IAsyncActionFilter
 
         if (await ParentWardAccess.GetAuthorizedParentIdAsync(db, context.HttpContext.User, studentId) is null)
         {
-            context.Result = new ForbidResult();
+            // #93: NotFound rather than Forbid — a caller who isn't authorized for this ward
+            // must not be able to distinguish "this student doesn't exist" from "it's not your
+            // ward" by the status code alone. Matches the standardized 404-for-both convention
+            // for ward-scoped resources used elsewhere (e.g. BrowsingController.
+            // ApproveWhitelistRequest's college-scoping check).
+            context.Result = new NotFoundResult();
             return;
         }
 

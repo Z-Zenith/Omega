@@ -12,7 +12,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class TimetableController(AppDbContext db, IPermissionService permissions, INotificationRouter notifications, ILogger<TimetableController> logger) : ControllerBase
+public class TimetableController(AppDbContext db, IPermissionService permissions, INotificationRouter notifications, ICollegeScopeService collegeScope, ILogger<TimetableController> logger) : ControllerBase
 {
     // 5 weekdays x 6 one-hour periods starting 9am. MVP scheduling heuristic, not a
     // constraint solver — enough to satisfy AWA-01/AWA-02's stated acceptance criteria.
@@ -32,7 +32,25 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
             return Forbid();
         }
 
-        var departmentScope = await permissions.GetDepartmentScopeAsync(userId) ?? request.DepartmentId;
+        var callerCollegeId = await collegeScope.GetCollegeIdAsync(userId);
+
+        // #129: a global (non-HoD) create_timetable holder previously fell back to an
+        // attacker-supplied request.DepartmentId with no ownership check, and to *no* filter
+        // at all (every section in every college) when that was also omitted. Both paths are
+        // now clamped to the caller's own college.
+        var departmentScope = await permissions.GetDepartmentScopeAsync(userId);
+        if (departmentScope is null && request.DepartmentId is { } requestedDepartmentId)
+        {
+            var requestedDepartmentCollegeId = await db.Departments
+                .Where(d => d.Id == requestedDepartmentId)
+                .Select(d => (Guid?)d.CollegeId)
+                .FirstOrDefaultAsync();
+            if (requestedDepartmentCollegeId != callerCollegeId)
+            {
+                return Forbid();
+            }
+            departmentScope = requestedDepartmentId;
+        }
 
         var assignmentsQuery = db.TeacherSectionAssignments
             .Include(a => a.Section)
@@ -42,6 +60,10 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         if (departmentScope is not null)
         {
             assignmentsQuery = assignmentsQuery.Where(a => a.Section.DepartmentId == departmentScope);
+        }
+        else
+        {
+            assignmentsQuery = assignmentsQuery.Where(a => a.Section.Department.CollegeId == callerCollegeId);
         }
         var assignments = await assignmentsQuery.ToListAsync();
 
@@ -178,7 +200,7 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         }
 
         var slot = await db.TimetableSlots
-            .Include(s => s.Section)
+            .Include(s => s.Section).ThenInclude(s => s.Department)
             .Include(s => s.Subject)
             .Include(s => s.Teacher)
             .FirstOrDefaultAsync(s => s.Id == id);
@@ -188,9 +210,23 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
         }
 
         var departmentScope = await permissions.GetDepartmentScopeAsync(userId);
-        if (departmentScope is not null && slot.Section.DepartmentId != departmentScope)
+        if (departmentScope is not null)
         {
-            return Forbid();
+            if (slot.Section.DepartmentId != departmentScope)
+            {
+                return Forbid();
+            }
+        }
+        else
+        {
+            // #129: a global (non-HoD) create_timetable holder's guard previously only ran
+            // when departmentScope was non-null, so any such caller could patch any slot in
+            // any college by guessing/enumerating slot ids. Clamp to the caller's own college.
+            var callerCollegeId = await collegeScope.GetCollegeIdAsync(userId);
+            if (slot.Section.Department.CollegeId != callerCollegeId)
+            {
+                return Forbid();
+            }
         }
 
         if (request.TeacherId is { } teacherId)
@@ -445,7 +481,11 @@ public class TimetableController(AppDbContext db, IPermissionService permissions
             return Forbid();
         }
 
-        var sessionDate = request.SessionDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        // #152: derive "today" from the college's local time zone, not raw UTC, so marking
+        // attendance near local midnight doesn't roll the session date to the wrong day and
+        // silently create a duplicate ClassSession for what the roster/UI treats as "today".
+        var college = await db.Colleges.FindAsync(caller.CollegeId);
+        var sessionDate = request.SessionDate ?? CollegeClock.LocalDate(college, DateTime.UtcNow);
         var session = await db.ClassSessions
             .FirstOrDefaultAsync(s => s.TimetableSlotId == slot.Id && s.SessionDate == sessionDate);
         if (session is null)
