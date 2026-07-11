@@ -124,4 +124,97 @@ public class MessagingControllerTests
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Single(await db.MessageThreads.ToListAsync());
     }
+
+    // #159: ListMessages should paginate rather than always returning every message ever
+    // sent in a thread.
+    [Fact]
+    public async Task Issue159_ListMessages_PaginatesInSentAtOrder()
+    {
+        await using var db = NewDb(Guid.NewGuid().ToString());
+        var student = NewUser(AccountType.Student);
+        var teacher = NewUser(AccountType.Teacher);
+        db.Users.AddRange(student, teacher);
+        var thread = new MessageThread { Id = Guid.NewGuid(), StudentId = student.Id, TeacherId = teacher.Id, CreatedAt = DateTime.UtcNow };
+        db.MessageThreads.Add(thread);
+        var baseTime = DateTime.UtcNow;
+        for (var i = 0; i < 5; i++)
+        {
+            db.Messages.Add(new Message
+            {
+                Id = Guid.NewGuid(),
+                ThreadId = thread.Id,
+                SenderId = student.Id,
+                Content = $"msg-{i}",
+                SentAt = baseTime.AddMinutes(i),
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListMessages(thread.Id, page: 2, pageSize: 2);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var messages = Assert.IsType<List<MessageResponse>>(ok.Value);
+        Assert.Equal(2, messages.Count);
+        Assert.Equal("msg-2", messages[0].Content);
+        Assert.Equal("msg-3", messages[1].Content);
+    }
+
+    // #159: ListThreads must not require .Include(t => t.Messages) (loading every message
+    // in every thread) to determine each thread's last message, and must support pagination.
+    [Fact]
+    public async Task Issue159_ListThreads_ReturnsLastMessage_AndOrdersMostRecentFirst()
+    {
+        await using var db = NewDb(Guid.NewGuid().ToString());
+        var student = NewUser(AccountType.Student);
+        var teacherA = NewUser(AccountType.Teacher);
+        var teacherB = NewUser(AccountType.Teacher);
+        db.Users.AddRange(student, teacherA, teacherB);
+
+        var threadA = new MessageThread { Id = Guid.NewGuid(), StudentId = student.Id, TeacherId = teacherA.Id, CreatedAt = DateTime.UtcNow.AddHours(-2) };
+        var threadB = new MessageThread { Id = Guid.NewGuid(), StudentId = student.Id, TeacherId = teacherB.Id, CreatedAt = DateTime.UtcNow.AddHours(-1) };
+        db.MessageThreads.AddRange(threadA, threadB);
+
+        db.Messages.AddRange(
+            new Message { Id = Guid.NewGuid(), ThreadId = threadA.Id, SenderId = student.Id, Content = "A-older", SentAt = DateTime.UtcNow.AddMinutes(-30) },
+            new Message { Id = Guid.NewGuid(), ThreadId = threadA.Id, SenderId = student.Id, Content = "A-newer", SentAt = DateTime.UtcNow.AddMinutes(-5) });
+        // threadB has no messages yet — falls back to CreatedAt for ordering.
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListThreads();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var summaries = Assert.IsType<List<ThreadSummaryResponse>>(ok.Value);
+        Assert.Equal(2, summaries.Count);
+        // threadA's last message (5 min ago) is more recent than threadB's CreatedAt (1h ago).
+        Assert.Equal(threadA.Id, summaries[0].Id);
+        Assert.Equal("A-newer", summaries[0].LastMessage?.Content);
+        Assert.Equal(threadB.Id, summaries[1].Id);
+        Assert.Null(summaries[1].LastMessage);
+    }
+
+    [Fact]
+    public async Task Issue159_ListThreads_SupportsPagination()
+    {
+        await using var db = NewDb(Guid.NewGuid().ToString());
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        for (var i = 0; i < 3; i++)
+        {
+            var teacher = NewUser(AccountType.Teacher);
+            db.Users.Add(teacher);
+            db.MessageThreads.Add(new MessageThread { Id = Guid.NewGuid(), StudentId = student.Id, TeacherId = teacher.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-i) });
+        }
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var page1 = await controller.ListThreads(page: 1, pageSize: 2);
+        var page2 = await controller.ListThreads(page: 2, pageSize: 2);
+
+        var ok1 = Assert.IsType<OkObjectResult>(page1.Result);
+        var ok2 = Assert.IsType<OkObjectResult>(page2.Result);
+        Assert.Equal(2, Assert.IsType<List<ThreadSummaryResponse>>(ok1.Value).Count);
+        Assert.Single(Assert.IsType<List<ThreadSummaryResponse>>(ok2.Value));
+    }
 }
