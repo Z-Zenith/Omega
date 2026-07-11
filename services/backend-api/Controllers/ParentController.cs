@@ -11,18 +11,29 @@ namespace BackendApi.Controllers;
 
 [ApiController]
 [Route("api/v1/parent")]
-public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService) : ControllerBase
+public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService, ParentLoginLockoutService lockout) : ControllerBase
 {
     // PRT-01 — roll number + DOB only, no TOTP. The credential identifies the ward, not a
     // separate parent identity; a parent account must already be linked to that ward via
     // parent_wards (provisioned out-of-band by admin account management, AWA-09/10).
     // Rate limited (#79): DOB-only auth is guessable, so this endpoint gets the same
-    // IP-keyed sliding-window limiter as AuthController.Login.
+    // IP-keyed sliding-window limiter as AuthController.Login. #134: that IP-keyed limiter
+    // alone is bypassed by rotating source IPs, so this also enforces a per-roll-number
+    // lockout via ParentLoginLockoutService, independent of caller IP.
     [HttpPost("login")]
     [AllowAnonymous]
     [EnableRateLimiting(RateLimiterPolicies.Auth)]
     public async Task<ActionResult<ParentLoginResponse>> Login(ParentLoginRequest request)
     {
+        if (lockout.IsLockedOut(request.RollNumber))
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                error = "account_locked",
+                message = "Too many failed login attempts for this roll number. Try again later.",
+            });
+        }
+
         // Identifier is only unique per (college_id, identifier), not globally — a roll number
         // can legitimately collide across colleges. Fail closed on ambiguity rather than
         // arbitrarily picking one match, since that could silently authenticate a parent
@@ -35,6 +46,7 @@ public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService)
 
         if (student is null)
         {
+            lockout.RecordFailure(request.RollNumber);
             return Unauthorized(new { error = "invalid_credentials", message = "No student matches that roll number and date of birth." });
         }
 
@@ -48,6 +60,7 @@ public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService)
 
         if (student.DateOfBirth != request.DateOfBirth)
         {
+            lockout.RecordFailure(request.RollNumber);
             return Unauthorized(new { error = "invalid_credentials", message = "No student matches that roll number and date of birth." });
         }
 
@@ -99,6 +112,8 @@ public class ParentController(AppDbContext db, IJwtTokenService jwtTokenService)
         };
         db.UserSessions.Add(newSession);
         await db.SaveChangesAsync();
+
+        lockout.RecordSuccess(request.RollNumber);
 
         var token = jwtTokenService.IssueToken(parent, newSession.Id, student.Id);
         return Ok(new ParentLoginResponse(token, parent.Id, newSession.Id, student.Id, student.FullName, student.Identifier));
