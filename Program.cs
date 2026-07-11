@@ -4,6 +4,7 @@ using BackendApi.Data.Entities;
 using BackendApi.Hubs;
 using BackendApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -34,6 +35,20 @@ builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connect
         .MapEnum<ScopeKind>()
         .MapEnum<WhitelistRequestStatus>();
 }));
+
+// #131: TOTP secrets are encrypted at rest via Data Protection (see TotpService). Keys must
+// be persisted outside the container's ephemeral filesystem or every restart/redeploy would
+// make every existing encrypted TotpSecret unreadable, locking every user out of login.
+// DOTNET_RUNNING_IN_CONTAINER is set by the official .NET base images, so this defaults to
+// the volume-mounted /keys path in Docker (see docker-compose.yml) and to a local folder
+// next to the build output otherwise (bare `dotnet run`, tests, etc.).
+var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
+    ?? (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true"
+        ? "/keys"
+        : Path.Combine(AppContext.BaseDirectory, "keys"));
+builder.Services.AddDataProtection()
+    .SetApplicationName("Campus.BackendApi")
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
 
 builder.Services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddScoped<ITotpService, TotpService>();

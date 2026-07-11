@@ -320,15 +320,8 @@ public class MarksController(AppDbContext db, IPermissionService permissions, IC
     {
         var studentId = CurrentUserId();
 
-        var internalMarks = await db.InternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new InternalMarkDto(m.SubjectId, m.Subject.Name, m.Marks, m.PublishedAt))
-            .ToListAsync();
-
-        var externalMarks = await db.ExternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new ExternalMarkDto(m.SubjectId, m.Subject.Name, m.Grade, m.ApprovedAt))
-            .ToListAsync();
+        var internalMarks = await PublishedMarksQueries.GetPublishedInternalMarksAsync(db, studentId);
+        var externalMarks = await PublishedMarksQueries.GetPublishedExternalMarksAsync(db, studentId);
 
         return Ok(new MyMarksResponse(internalMarks, externalMarks));
     }
@@ -355,15 +348,8 @@ public class MarksController(AppDbContext db, IPermissionService permissions, IC
                 a.Status.ToString()))
             .ToListAsync();
 
-        var internalMarks = await db.InternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new InternalMarkDto(m.SubjectId, m.Subject.Name, m.Marks, m.PublishedAt))
-            .ToListAsync();
-
-        var externalMarks = await db.ExternalMarks
-            .Where(m => m.StudentId == studentId && m.Published)
-            .Select(m => new ExternalMarkDto(m.SubjectId, m.Subject.Name, m.Grade, m.ApprovedAt))
-            .ToListAsync();
+        var internalMarks = await PublishedMarksQueries.GetPublishedInternalMarksAsync(db, studentId);
+        var externalMarks = await PublishedMarksQueries.GetPublishedExternalMarksAsync(db, studentId);
 
         return Ok(new WardRecordResponse(student.Id, student.FullName, attendance, internalMarks, externalMarks));
     }
