@@ -22,10 +22,14 @@ export function FeesPage() {
     setPayingId(feeId)
     try {
       await payFee(feeId)
-      await queryClient.invalidateQueries({ queryKey: ['ward-fees', wardStudentId] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Payment failed')
     } finally {
+      // #157 — resync on every outcome, not just success: a 409 (already paid, e.g. from
+      // another tab or a losing double-click) means the fee genuinely is settled, so the
+      // stale "Pending" card and clickable "Pay now" button need to refresh here too,
+      // not just disappear on the next unrelated navigation.
+      await queryClient.invalidateQueries({ queryKey: ['ward-fees', wardStudentId] })
       setPayingId(null)
     }
   }
