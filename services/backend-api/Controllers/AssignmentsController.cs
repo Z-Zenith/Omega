@@ -128,6 +128,19 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
             });
         }
 
+        // #159: mirrors AutoSubmit's own check below — a student who already has a
+        // submission (manual or auto) for this assignment shouldn't be able to create an
+        // unlimited number of additional ones just by calling this endpoint again. There's
+        // no unique DB constraint on (assignment_id, student_id) (only a non-unique index —
+        // adding one would be a schema change requiring CLAUDE.md's contract-change sign-
+        // off), so this is enforced at the application level, same as AutoSubmit.
+        var alreadySubmitted = await db.Submissions
+            .AnyAsync(s => s.AssignmentId == id && s.StudentId == userId);
+        if (alreadySubmitted)
+        {
+            return Conflict(new { error = "already_submitted", message = "A submission already exists for this assignment." });
+        }
+
         var submittedAt = DateTime.UtcNow;
         var submission = new Submission
         {
