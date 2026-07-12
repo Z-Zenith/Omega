@@ -51,6 +51,9 @@ public partial class User
     public virtual ICollection<AttendanceRecord> AttendanceRecordStudents { get; set; } = new List<AttendanceRecord>();
 
     [InverseProperty("Student")]
+    public virtual ICollection<BrowsingHistory> BrowsingHistories { get; set; } = new List<BrowsingHistory>();
+
+    [InverseProperty("Student")]
     public virtual ICollection<BrowsingHistorySummary> BrowsingHistorySummaries { get; set; } = new List<BrowsingHistorySummary>();
 
     [InverseProperty("ActualTeacher")]
