@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
@@ -22,7 +24,8 @@ public class WebhooksController(AppDbContext db, IConfiguration configuration, I
     public async Task<IActionResult> CopyleaksResult(string scanId, string status, [FromQuery] string? secret, [FromBody] JsonElement payload)
     {
         var expectedSecret = configuration["Copyleaks:WebhookSecret"];
-        if (string.IsNullOrEmpty(expectedSecret) || secret != expectedSecret)
+        if (string.IsNullOrEmpty(expectedSecret) || string.IsNullOrEmpty(secret)
+            || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(expectedSecret)))
         {
             return Unauthorized();
         }
