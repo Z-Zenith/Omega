@@ -3,9 +3,11 @@ using BackendApi.Contracts;
 using BackendApi.Controllers;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using BackendApi.Tests.Fakes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace BackendApi.Tests.Controllers;
 
@@ -25,17 +27,24 @@ public class AssignmentsControllerTests
         IsActive = true,
     };
 
-    private static AssignmentsController ControllerAs(AppDbContext db, User user) => new(db)
+    private static Department NewDepartment() => new() { Id = Guid.NewGuid(), Name = "CS", CollegeId = Guid.NewGuid() };
+
+    private static AssignmentsController ControllerAs(
+        AppDbContext db, User user, FakeAiServicesClient? aiServices = null, FakeCopyleaksClient? copyleaks = null)
     {
-        ControllerContext = new ControllerContext
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Copyleaks:WebhookSecret"] = "test-secret" })
+            .Build();
+        return new AssignmentsController(db, aiServices ?? new FakeAiServicesClient(), copyleaks ?? new FakeCopyleaksClient(), configuration)
         {
-            HttpContext = new DefaultHttpContext
+            ControllerContext = new ControllerContext
             {
-                User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth")),
+                HttpContext = new DefaultHttpContext { User = principal, Request = { Scheme = "https", Host = new HostString("campus.test") } },
             },
-        },
-    };
+        };
+    }
 
     // #135 (already merged, see below) requires the submitting student to be enrolled in a
     // section the assignment's subject is taught to - seed that link too so these #159 tests
@@ -179,7 +188,7 @@ public class AssignmentsControllerTests
     }
 
     private static AssignmentsController ControllerAs(AppDbContext db, Guid userId) =>
-        new(db)
+        new(db, new FakeAiServicesClient(), new FakeCopyleaksClient(), new ConfigurationBuilder().Build())
         {
             ControllerContext = new ControllerContext
             {
@@ -245,5 +254,305 @@ public class AssignmentsControllerTests
 
         Assert.IsType<NotFoundResult>(result.Result);
         Assert.Empty(await db.Submissions.ToListAsync());
+    }
+
+    // AIS-03
+    [Fact]
+    public async Task Ais03_CopyCheck_ForbidsCallersWhoAreNotTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Code, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.CopyCheck(assignment.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais03_CopyCheck_PersistsFlaggedMatchesFromAiServices()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Code, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submissionA = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "print(1)", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        var submissionB = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "print(1)", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.AddRange(submissionA, submissionB);
+        await db.SaveChangesAsync();
+
+        var fakeAi = new FakeAiServicesClient
+        {
+            SimilarityMatches = [new(submissionA.Id.ToString(), submissionB.Id.ToString(), 0.95)],
+        };
+        var controller = ControllerAs(db, teacher, fakeAi);
+        var result = await controller.CopyCheck(assignment.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var matches = Assert.IsType<List<CopyCheckMatchDto>>(ok.Value);
+        var match = Assert.Single(matches);
+        Assert.Equal(0.95m, match.SimilarityScore);
+        Assert.Single(await db.CopyCheckFlags.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ais03_CopyCheck_ReCheckReplacesPreviousFlags()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Code, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submissionA = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "print(1)", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        var submissionB = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "print(2)", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.AddRange(submissionA, submissionB);
+        db.CopyCheckFlags.Add(new CopyCheckFlag { Id = Guid.NewGuid(), SubmissionAId = submissionA.Id, SubmissionBId = submissionB.Id, SimilarityScore = 0.99m, FlaggedAt = DateTime.UtcNow.AddDays(-1) });
+        await db.SaveChangesAsync();
+
+        // Nothing matches this time — the stale flag from the previous run must go away.
+        var controller = ControllerAs(db, teacher, new FakeAiServicesClient());
+        var result = await controller.CopyCheck(assignment.Id);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(await db.CopyCheckFlags.ToListAsync());
+    }
+
+    // AIS-02
+    [Fact]
+    public async Task Ais02_RequestPlagiarismCheck_ForbidsCallersWhoAreNotTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.RequestPlagiarismCheck(submission.Id);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task Ais02_RequestPlagiarismCheck_WithoutCopyleaksConfigured_Returns503()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher, copyleaks: new FakeCopyleaksClient { Configured = false });
+        var result = Assert.IsType<ObjectResult>(await controller.RequestPlagiarismCheck(submission.Id));
+
+        Assert.Equal(503, result.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ais02_RequestPlagiarismCheck_SubmitsScanKeyedToTheSubmission()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var fakeCopyleaks = new FakeCopyleaksClient();
+        var controller = ControllerAs(db, teacher, copyleaks: fakeCopyleaks);
+        var result = Assert.IsType<AcceptedResult>(await controller.RequestPlagiarismCheck(submission.Id));
+
+        var accepted = Assert.IsType<PlagiarismCheckAcceptedDto>(result.Value);
+        Assert.Equal("pending", accepted.Status);
+        Assert.Equal(submission.Id.ToString("N"), fakeCopyleaks.LastScanId);
+        Assert.Equal("an essay", fakeCopyleaks.LastContent);
+        Assert.Contains("secret=test-secret", fakeCopyleaks.LastWebhookUrlTemplate);
+    }
+
+    [Fact]
+    public async Task Ais02_PlagiarismReport_ForbidsCallersWhoAreNotTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.PlagiarismReport(submission.Id);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task Ais02_PlagiarismReport_ReturnsPendingStatus_BeforeTheWebhookFires()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = Assert.IsType<OkObjectResult>(await controller.PlagiarismReport(submission.Id));
+
+        var status = Assert.IsType<PlagiarismReportStatusDto>(result.Value);
+        Assert.Equal("pending", status.Status);
+    }
+
+    [Fact]
+    public async Task Ais02_PlagiarismReport_ReturnsThePersistedReport_OnceOneExists()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "an essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        db.PlagiarismReports.Add(new PlagiarismReport
+        {
+            Id = Guid.NewGuid(),
+            SubmissionId = submission.Id,
+            SimilarityScore = 0.12m,
+            CopyleaksScanId = submission.Id.ToString("N"),
+            MatchedSources = "[\"https://example.com\"]",
+            CheckedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = Assert.IsType<OkObjectResult>(await controller.PlagiarismReport(submission.Id));
+
+        var dto = Assert.IsType<PlagiarismReportDto>(result.Value);
+        Assert.Equal(0.12m, dto.SimilarityScore);
+        Assert.Equal(["https://example.com"], dto.MatchedSources);
+    }
+
+    // AIS-04
+    [Fact]
+    public async Task Ais04_AutogradeSuggestion_ForbidsCallersWhoAreNotTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "my essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.AutogradeSuggestion(submission.Id, new RequestAutogradeSuggestion([new("Thesis", ["thesis"], 1.0)], 100));
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais04_AutogradeSuggestion_RejectsRubricWeightsThatDoNotSumToOne()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "my essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.AutogradeSuggestion(submission.Id, new RequestAutogradeSuggestion([new("Thesis", ["thesis"], 0.5)], 100));
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Ais04_AutogradeSuggestion_PersistsSuggestedGrade_AndReturnsAdvisoryDetail()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "my essay about the thesis", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        var fakeAi = new FakeAiServicesClient
+        {
+            AutogradeResult = new(82.5, 100, 0.8, ["Thesis"], ["Good coverage of the thesis criterion."]),
+        };
+        var controller = ControllerAs(db, teacher, fakeAi);
+        var result = await controller.AutogradeSuggestion(submission.Id, new RequestAutogradeSuggestion([new("Thesis", ["thesis"], 1.0)], 100));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<AutogradeSuggestionDto>(ok.Value);
+        Assert.Equal(82.5m, dto.SuggestedGrade);
+        Assert.Equal("Good coverage of the thesis criterion.", Assert.Single(dto.Feedback));
+
+        var stored = Assert.Single(await db.AutogradeSuggestions.ToListAsync());
+        Assert.False(stored.ConfirmedByTeacher);
+    }
+
+    [Fact]
+    public async Task Ais04_Grade_ConfirmsTheSuggestion_ButDoesNotThrowForATeacherOnlyBookkeepingRecord()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = teacher.Id, Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "my essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        var suggestion = new BackendApi.Data.Entities.AutogradeSuggestion { Id = Guid.NewGuid(), SubmissionId = submission.Id, SuggestedGrade = 80m, ConfirmedByTeacher = false };
+        db.Users.Add(teacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        db.AutogradeSuggestions.Add(suggestion);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, teacher);
+        var result = await controller.Grade(submission.Id, new ConfirmGradeRequest(suggestion.Id));
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<ConfirmedGradeDto>(ok.Value);
+        Assert.True(dto.ConfirmedByTeacher);
+        Assert.NotNull(dto.ConfirmedAt);
+    }
+
+    [Fact]
+    public async Task Ais04_Grade_ForbidsCallersWhoAreNotTheAssignmentsTeacher()
+    {
+        await using var db = NewDb();
+        var otherTeacher = NewUser(AccountType.Teacher);
+        var assignment = new Assignment { Id = Guid.NewGuid(), SubjectId = Guid.NewGuid(), TeacherId = Guid.NewGuid(), Title = "A1", Type = AssignmentType.Essay, DueDate = new DateTime(2026, 8, 15), SubmissionWindowStart = new DateTime(2026, 8, 1), SubmissionWindowEnd = new DateTime(2026, 8, 15) };
+        var submission = new Submission { Id = Guid.NewGuid(), AssignmentId = assignment.Id, StudentId = Guid.NewGuid(), ContentUrl = "my essay", SubmittedAt = DateTime.UtcNow, IsLate = false, IsAutosubmitted = false };
+        var suggestion = new BackendApi.Data.Entities.AutogradeSuggestion { Id = Guid.NewGuid(), SubmissionId = submission.Id, SuggestedGrade = 80m, ConfirmedByTeacher = false };
+        db.Users.Add(otherTeacher);
+        db.Assignments.Add(assignment);
+        db.Submissions.Add(submission);
+        db.AutogradeSuggestions.Add(suggestion);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, otherTeacher);
+        var result = await controller.Grade(submission.Id, new ConfirmGradeRequest(suggestion.Id));
+
+        Assert.IsType<ForbidResult>(result.Result);
     }
 }

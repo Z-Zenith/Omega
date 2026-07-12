@@ -3,6 +3,7 @@ using System.Text.Json;
 using BackendApi.Contracts;
 using BackendApi.Data;
 using BackendApi.Data.Entities;
+using BackendApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,7 @@ namespace BackendApi.Controllers;
 [ApiController]
 [Route("api/v1")]
 [Authorize]
-public class AssignmentsController(AppDbContext db) : ControllerBase
+public class AssignmentsController(AppDbContext db, IAiServicesClient aiServices, ICopyleaksClient copyleaks, IConfiguration configuration) : ControllerBase
 {
     // TWA-07. Gated by "caller teaches this subject" rather than a permission code — no
     // "create_assignment" code exists in the seeded catalog, and adding one is an
@@ -242,20 +243,222 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
         return Ok(ToSubmissionDto(submission));
     }
 
-    [HttpGet("submissions/{id}/plagiarism-report")]
-    public IActionResult PlagiarismReport(Guid id) => StatusCode(501, new { feature = "AIS-02", status = "not_implemented" });
+    // AIS-02: kicks off an async Copyleaks scan (see CopyleaksClient) — unlike AIS-03's
+    // copy-check, the similarity score isn't available synchronously; it arrives later
+    // via WebhooksController.CopyleaksResult. Gated the same as copy-check: the
+    // assignment's own teacher, or Admin. Changed from the original stub's GET on
+    // /plagiarism-report to a separate POST /plagiarism-check that triggers the scan —
+    // /plagiarism-report (below) stays a GET since it now just reads whatever's persisted.
+    [HttpPost("submissions/{id}/plagiarism-check")]
+    public async Task<IActionResult> RequestPlagiarismCheck(Guid id)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
 
-    [HttpGet("assignments/{id}/copy-check")]
-    public IActionResult CopyCheck(Guid id) => StatusCode(501, new { feature = "AIS-03", status = "not_implemented" });
+        var submission = await db.Submissions.Include(s => s.Assignment).FirstOrDefaultAsync(s => s.Id == id);
+        if (submission is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && submission.Assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        var scanId = id.ToString("N");
+        try
+        {
+            var secret = configuration["Copyleaks:WebhookSecret"] ?? "";
+            var webhookUrlTemplate =
+                $"{Request.Scheme}://{Request.Host}/api/v1/webhooks/copyleaks/{scanId}/{{status}}?secret={Uri.EscapeDataString(secret)}";
+            await copyleaks.SubmitScanAsync(scanId, submission.ContentUrl, webhookUrlTemplate);
+        }
+        catch (ExternalServiceNotConfiguredException)
+        {
+            return StatusCode(503, new
+            {
+                error = "service_not_configured",
+                message = "Internet plagiarism checking is not configured for this deployment (missing Copyleaks credentials).",
+            });
+        }
+
+        return Accepted(new PlagiarismCheckAcceptedDto(id, scanId, "pending"));
+    }
+
+    // Never shown to the submitting student (AIS-02 acceptance criterion) — enforced here
+    // by the same teacher-or-Admin gate as the trigger endpoint above, not by hiding an
+    // otherwise-reachable route.
+    [HttpGet("submissions/{id}/plagiarism-report")]
+    public async Task<IActionResult> PlagiarismReport(Guid id)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+
+        var submission = await db.Submissions.Include(s => s.Assignment).FirstOrDefaultAsync(s => s.Id == id);
+        if (submission is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && submission.Assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        var report = await db.PlagiarismReports.FirstOrDefaultAsync(r => r.SubmissionId == id);
+        if (report is null)
+        {
+            return Ok(new PlagiarismReportStatusDto(id, "pending"));
+        }
+
+        return Ok(ToPlagiarismDto(report));
+    }
 
     [HttpGet("submissions/{id}/ai-detection")]
     public IActionResult AiDetection(Guid id) => StatusCode(501, new { feature = "AIS-05", status = "not_implemented" });
 
-    [HttpGet("submissions/{id}/autograde-suggestion")]
-    public IActionResult AutogradeSuggestion(Guid id) => StatusCode(501, new { feature = "AIS-04", status = "not_implemented" });
+    // AIS-03: compares this assignment's submissions against each other via the
+    // self-hosted embedding-similarity model, flagging matches at >=90% (per
+    // copy_check_flags' own documented threshold). Re-checking replaces any previous
+    // flags for this assignment's submissions rather than accumulating stale ones.
+    // Changed from the original stub's GET to a POST: this triggers a fresh analysis
+    // and writes rows, it doesn't just fetch a cached resource.
+    [HttpPost("assignments/{id}/copy-check")]
+    public async Task<ActionResult<List<CopyCheckMatchDto>>> CopyCheck(Guid id)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
 
+        var assignment = await db.Assignments.FindAsync(id);
+        if (assignment is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        var submissions = await db.Submissions.Where(s => s.AssignmentId == id).ToListAsync();
+        var submissionIds = submissions.Select(s => s.Id).ToHashSet();
+
+        var existingFlags = await db.CopyCheckFlags
+            .Where(f => submissionIds.Contains(f.SubmissionAId) || submissionIds.Contains(f.SubmissionBId))
+            .ToListAsync();
+        db.CopyCheckFlags.RemoveRange(existingFlags);
+
+        if (submissions.Count < 2)
+        {
+            await db.SaveChangesAsync();
+            return Ok(new List<CopyCheckMatchDto>());
+        }
+
+        var pairs = submissions.Select(s => (s.Id.ToString(), s.ContentUrl)).ToList();
+        var matches = await aiServices.CheckSimilarityAsync(pairs, threshold: 0.90);
+
+        var now = DateTime.UtcNow;
+        var flags = matches.Select(m => new CopyCheckFlag
+        {
+            Id = Guid.NewGuid(),
+            SubmissionAId = Guid.Parse(m.SubmissionAId),
+            SubmissionBId = Guid.Parse(m.SubmissionBId),
+            SimilarityScore = (decimal)m.SimilarityScore,
+            FlaggedAt = now,
+        }).ToList();
+        db.CopyCheckFlags.AddRange(flags);
+        await db.SaveChangesAsync();
+
+        return Ok(flags.Select(f => new CopyCheckMatchDto(f.SubmissionAId, f.SubmissionBId, f.SimilarityScore)).ToList());
+    }
+
+    // AIS-04: advisory only, via the self-hosted keyword-rubric model — the caller
+    // (teacher) supplies the rubric ad hoc since no Rubric table exists in the schema.
+    // Changed from the original stub's parameterless GET to a POST carrying the rubric:
+    // a rubric can't be threaded through query-string params sanely.
+    [HttpPost("submissions/{id}/autograde-suggestion")]
+    public async Task<ActionResult<AutogradeSuggestionDto>> AutogradeSuggestion(Guid id, RequestAutogradeSuggestion request)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+
+        var submission = await db.Submissions.Include(s => s.Assignment).FirstOrDefaultAsync(s => s.Id == id);
+        if (submission is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && submission.Assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        if (request.Rubric.Count == 0)
+        {
+            return BadRequest(new { error = "rubric_required", message = "At least one rubric criterion is required." });
+        }
+        var totalWeight = request.Rubric.Sum(c => c.Weight);
+        if (Math.Abs(totalWeight - 1.0) > 0.01)
+        {
+            return BadRequest(new { error = "invalid_weights", message = $"Rubric weights must sum to 1.0 (got {totalWeight:F4})." });
+        }
+
+        var rubric = request.Rubric.Select(c => new RubricCriterion(c.Name, c.Keywords, c.Weight)).ToList();
+        var result = await aiServices.SuggestAutogradeAsync(submission.ContentUrl, rubric, request.MaxScore);
+
+        var suggestion = new Data.Entities.AutogradeSuggestion
+        {
+            Id = Guid.NewGuid(),
+            SubmissionId = id,
+            SuggestedGrade = (decimal)result.SuggestedGrade,
+            ConfirmedByTeacher = false,
+        };
+        db.AutogradeSuggestions.Add(suggestion);
+        await db.SaveChangesAsync();
+
+        return Ok(new AutogradeSuggestionDto(
+            suggestion.Id, id, suggestion.SuggestedGrade, result.MaxScore, result.Confidence, result.MatchedCriteria, result.Feedback));
+    }
+
+    // Bookkeeping distinct from actually publishing marks (TWA-16, POST /marks/internal)
+    // — this only records that a teacher reviewed and accepted a specific suggestion,
+    // matching the acceptance criterion that autograde is "never auto-published".
     [HttpPost("submissions/{id}/grade")]
-    public IActionResult Grade(Guid id) => StatusCode(501, new { feature = "grade-confirm", status = "not_implemented" });
+    public async Task<ActionResult<ConfirmedGradeDto>> Grade(Guid id, ConfirmGradeRequest request)
+    {
+        var caller = await CurrentUserAsync();
+        if (caller is null)
+        {
+            return Unauthorized();
+        }
+
+        var suggestion = await db.AutogradeSuggestions
+            .Include(s => s.Submission).ThenInclude(sub => sub.Assignment)
+            .FirstOrDefaultAsync(s => s.Id == request.SuggestionId && s.SubmissionId == id);
+        if (suggestion is null)
+        {
+            return NotFound();
+        }
+        if (caller.AccountType is not AccountType.AdminTier && suggestion.Submission.Assignment.TeacherId != caller.Id)
+        {
+            return Forbid();
+        }
+
+        suggestion.ConfirmedByTeacher = true;
+        suggestion.ConfirmedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return Ok(new ConfirmedGradeDto(suggestion.Id, suggestion.SubmissionId, suggestion.SuggestedGrade, suggestion.ConfirmedByTeacher, suggestion.ConfirmedAt));
+    }
 
     // #135: a student is "enrolled in this assignment's subject" if they're a member of
     // any section that subject is actually taught to — same TeacherSectionAssignments +
@@ -296,5 +499,12 @@ public class AssignmentsController(AppDbContext db) : ControllerBase
     private static SubmissionDto ToSubmissionDto(Submission s) => new(
         s.Id, s.AssignmentId, s.StudentId, s.ContentUrl, s.SubmittedAt, s.IsLate, s.IsAutosubmitted);
 
+    private static PlagiarismReportDto ToPlagiarismDto(PlagiarismReport r) => new(
+        r.Id, r.SubmissionId, r.SimilarityScore, r.CopyleaksScanId,
+        string.IsNullOrEmpty(r.MatchedSources) ? [] : JsonSerializer.Deserialize<List<string>>(r.MatchedSources) ?? [],
+        r.CheckedAt);
+
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub")!);
+
+    private Task<User?> CurrentUserAsync() => db.Users.FindAsync(CurrentUserId()).AsTask();
 }
