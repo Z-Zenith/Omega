@@ -19,8 +19,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.42.2",
-    "lucide-react": "^1.23.0",
-    "radix-ui": "^1.6.2",
+    "lucide-react": "^1.25.0",
+    "radix-ui": "^1.6.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
@@ -28,7 +28,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.2",
+    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.13.2",
@@ -37,10 +37,10 @@
     "@vitejs/plugin-react": "^6.0.3",
     "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^29.1.1",
-    "oxlint": "^1.73.0",
+    "oxlint": "^1.74.0",
     "tailwindcss": "^4.3.2",
     "typescript": "~6.0.2",
-    "vite": "^8.1.1",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10"
   }
 }
