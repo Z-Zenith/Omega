@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace BackendApi.Tests;
+namespace BackendApi.Tests.Controllers;
 
 public class CommunityControllerTests
 {
@@ -39,6 +39,16 @@ public class CommunityControllerTests
         Id = Guid.NewGuid(),
         UserId = userId,
         PermissionCode = "create_group",
+        Granted = true,
+        GrantedBy = Guid.NewGuid(),
+        CreatedAt = DateTime.UtcNow,
+    };
+
+    private static PermissionGrant GrantViewAllGroups(Guid userId) => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = userId,
+        PermissionCode = "view_all_groups",
         Granted = true,
         GrantedBy = Guid.NewGuid(),
         CreatedAt = DateTime.UtcNow,
@@ -223,5 +233,121 @@ public class CommunityControllerTests
         Assert.Equal("First post!", dto.Content);
         Assert.Equal(student.Id, dto.AuthorId);
         Assert.Single(await db.GroupPosts.Where(p => p.GroupId == group.Id).ToListAsync());
+    }
+
+    // AWA-06: "no group is excluded from Admin's view regardless of who created it".
+    [Fact]
+    public async Task Awa06_AllGroups_ForbidsCallersWithoutViewAllGroupsPermission()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.AllGroups();
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Awa06_AllGroups_ReturnsEveryGroupRegardlessOfMembershipOrCollege()
+    {
+        await using var db = NewDb();
+        var admin = NewUser(AccountType.AdminTier);
+        db.Users.Add(admin);
+        db.PermissionGrants.Add(GrantViewAllGroups(admin.Id));
+        db.Groups.AddRange(
+            new Group { Id = Guid.NewGuid(), CollegeId = Guid.NewGuid(), Name = "Group A", Type = GroupType.Club, CreatedBy = Guid.NewGuid() },
+            new Group { Id = Guid.NewGuid(), CollegeId = Guid.NewGuid(), Name = "Group B", Type = GroupType.SubjectSection, CreatedBy = Guid.NewGuid() });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, admin);
+        var result = await controller.AllGroups();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var response = Assert.IsType<MyGroupsResponse>(ok.Value);
+        Assert.Equal(2, response.Groups.Count);
+    }
+
+    // TWA-05, SDA-16: "view and post in groups they belong to" — the view half.
+    [Fact]
+    public async Task Twa05Sda16_ListPosts_ForbidsNonMembers()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        var group = new Group { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "Club", Type = GroupType.Club };
+        db.Groups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListPosts(group.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Twa05Sda16_ListPosts_ReturnsGroupPostsNewestFirst_ForMembers()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        var group = new Group { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "Club", Type = GroupType.Club };
+        db.Groups.Add(group);
+        db.GroupMembers.Add(new GroupMember { Id = Guid.NewGuid(), GroupId = group.Id, UserId = student.Id });
+        db.GroupPosts.AddRange(
+            new GroupPost { Id = Guid.NewGuid(), GroupId = group.Id, AuthorId = student.Id, Content = "Older", CreatedAt = DateTime.UtcNow.AddMinutes(-5) },
+            new GroupPost { Id = Guid.NewGuid(), GroupId = group.Id, AuthorId = student.Id, Content = "Newer", CreatedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListPosts(group.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var posts = Assert.IsType<List<GroupPostDto>>(ok.Value);
+        Assert.Equal(2, posts.Count);
+        Assert.Equal("Newer", posts[0].Content);
+        Assert.Equal("Older", posts[1].Content);
+    }
+
+    // SDA-16: material shared in a group must surface in that group's Materials list
+    // without a separate upload step, i.e. reading the same rows TWA-06 writes.
+    [Fact]
+    public async Task Sda16_ListGroupMaterials_ForbidsNonMembers()
+    {
+        await using var db = NewDb();
+        var student = NewUser(AccountType.Student);
+        db.Users.Add(student);
+        var group = new Group { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "Club", Type = GroupType.Club };
+        db.Groups.Add(group);
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListGroupMaterials(group.Id);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task Sda16_ListGroupMaterials_ReturnsMaterialsSharedInTheGroup()
+    {
+        await using var db = NewDb();
+        var teacher = NewUser(AccountType.Teacher);
+        var student = NewUser(AccountType.Student);
+        db.Users.AddRange(teacher, student);
+        var group = new Group { Id = Guid.NewGuid(), CollegeId = student.CollegeId, Name = "Club", Type = GroupType.Club };
+        db.Groups.Add(group);
+        db.GroupMembers.Add(new GroupMember { Id = Guid.NewGuid(), GroupId = group.Id, UserId = student.Id });
+        db.Materials.Add(new Material { Id = Guid.NewGuid(), GroupId = group.Id, Title = "Slides", FileUrl = "https://example.com/slides.pdf", UploadedBy = teacher.Id, UploadedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var controller = ControllerAs(db, student);
+        var result = await controller.ListGroupMaterials(group.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var materials = Assert.IsType<List<MaterialDto>>(ok.Value);
+        var entry = Assert.Single(materials);
+        Assert.Equal("Slides", entry.Title);
     }
 }

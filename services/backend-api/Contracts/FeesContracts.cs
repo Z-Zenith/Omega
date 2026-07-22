@@ -9,4 +9,4 @@ public record CreateFeeLinkRequest(Guid StudentId, decimal Amount, DateOnly DueD
 public record FeeLinkResponse(Guid FeeRecordId, string PaymentLink, decimal Amount, DateOnly DueDate, string Status);
 
 // AWA-05
-public record SendFeeRemindersResponse(int FeesDueSoon, List<Guid> NotifiedParentIds);
+public record SendFeeRemindersResponse(int RemindersSent);

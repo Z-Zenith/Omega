@@ -43,6 +43,20 @@ public record ExternalMarkSubmissionResponse(
 // the option must disappear the moment the underlying grant expires.
 public record ExternalMarksPermissionStatusResponse(bool Granted, DateTime? ExpiresAt);
 
+// TWA-20
+public record PendingExternalMarkDto(
+    Guid Id,
+    Guid StudentId,
+    string StudentFullName,
+    Guid SubjectId,
+    string SubjectName,
+    string Grade,
+    Guid SubmittedBy,
+    string SubmittedByFullName,
+    DateTime SubmittedAt);
+
+public record ApproveExternalMarkResponse(Guid Id, Guid ApprovedBy, DateTime ApprovedAt);
+
 public record AttendanceRecordDto(DateOnly SessionDate, Guid SubjectId, string SubjectName, string Status);
 
 // SDA-15

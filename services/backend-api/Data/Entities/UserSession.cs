@@ -27,6 +27,6 @@ public partial class UserSession
     public DateTime CreatedAt { get; set; }
 
     [ForeignKey("UserId")]
-    [InverseProperty("UserSession")]
+    [InverseProperty("UserSessions")]
     public virtual User User { get; set; } = null!;
 }
