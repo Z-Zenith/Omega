@@ -767,7 +767,7 @@ public class TimetableControllerTests
     {
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], "TestAuth"));
-        return new TimetableController(db, new FakePermissionService(), notifications)
+        return new TimetableController(db, new FakePermissionService(), notifications, new CollegeScopeService(db), NullLogger<TimetableController>.Instance)
         {
             ControllerContext = new ControllerContext
             {
