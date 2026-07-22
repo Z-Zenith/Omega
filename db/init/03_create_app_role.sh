@@ -1,24 +1,23 @@
 #!/bin/sh
-# Additive, least-privilege application role for backend-api (#137 part 3).
+# Least-privilege application role for backend-api (#137 part 3).
 #
-# Today backend-api connects to Postgres as the `campus` superuser configured
-# above (POSTGRES_USER in docker-compose.yml's `postgres` service) — the
-# official postgres image's default POSTGRES_USER is always granted
-# superuser. This script provisions a non-superuser `campus_app` role scoped
-# to exactly the tables backend-api touches, as additive infrastructure.
+# The official postgres image's default POSTGRES_USER (`campus`) is always
+# granted superuser — this script provisions a non-superuser `campus_app`
+# role scoped to exactly the tables backend-api touches, and
+# docker-compose.yml's backend-api service now connects as `campus_app`
+# (ConnectionStrings__Campus), not the `campus` superuser. `campus` is still
+# used for 01_schema.sql/this init script and for local `dotnet run` without
+# docker compose (appsettings.json's dev placeholder) — only the containerized
+# app connection was cut over, per CLAUDE.md's "ask before changing the DB
+# schema" rule (explicitly approved) and reviewed here.
 #
-# IMPORTANT — this does NOT change what backend-api actually connects as.
-# ConnectionStrings__Campus / appsettings.json still point at `campus`
-# (superuser). Cutting that over to `campus_app` is deliberately left as a
-# separate follow-up: per CLAUDE.md's "ask before changing the DB schema"
-# rule and because this is genuinely the riskiest of the #137 fixes to get
-# wrong blind (a missed table/sequence grant silently breaks whatever query
-# needed it, in production, at the worst possible time), it needs its own
-# focused verification pass rather than being bundled into an infra-hardening
-# sweep. Treat this file as "the role exists and is provisioned correctly",
-# not "the app already uses it" — flagging that explicitly for a second look
-# in review even though the change here is additive-only and does not alter
-# any existing table/column definition.
+# Verified: docker compose config renders the interpolated connection string
+# correctly (Username=campus_app). Not verified against a live Postgres in
+# this session (Docker daemon unavailable here — docker compose config
+# parses/validates but `docker compose up` needs the daemon) — same caveat as
+# prior sessions' PRs. Whoever next has Docker available should bring up
+# `postgres` + `backend-api` and confirm login/CRUD-through-the-app works
+# end-to-end before treating this as fully verified in a real environment.
 #
 # Scope verification: every GRANT below targets `ALL TABLES IN SCHEMA public`
 # rather than an enumerated list, because that scope was cross-checked against
