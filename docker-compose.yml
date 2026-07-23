@@ -60,10 +60,13 @@ services:
     container_name: campus-backend-api
     restart: unless-stopped
     environment:
-      # POSTGRES_PASSWORD is required (see postgres service above) and reused here so the
-      # two never drift. Program.cs also fails fast outside Development if this still
-      # resolves to the committed appsettings.json dev placeholder.
-      ConnectionStrings__Campus: "Host=postgres;Port=5432;Database=campus;Username=campus;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting backend-api}"
+      # Cut over to the least-privilege campus_app role (#137) provisioned by
+      # db/init/03_create_app_role.sh instead of the campus superuser — backend-api
+      # only ever does row-level CRUD, never DDL/role/database administration.
+      # POSTGRES_APP_PASSWORD is required (see postgres service above) and reused
+      # here so the two never drift. Program.cs also fails fast outside Development
+      # if this still resolves to the committed appsettings.json dev placeholder.
+      ConnectionStrings__Campus: "Host=postgres;Port=5432;Database=campus;Username=campus_app;Password=${POSTGRES_APP_PASSWORD:-campus_app_dev}"
       # Required in non-Development environments — backend-api fails fast at startup if unset.
       # Set JWT_SIGNING_KEY in the shell/.env before `docker compose up`; never commit a real value.
       Jwt__Key: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY before starting backend-api}
