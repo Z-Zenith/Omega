@@ -13,8 +13,11 @@ component consumed by the **Teacher Web App** (TWA, `TWA-18`) and the **Student 
 ## Consumers
 
 - **TWA (React + TypeScript):** imports the components directly.
-- **SDA (Avalonia / .NET 10):** a C# binding is **deferred to a later PR**, same as the
-  Shared Editor Kit's SDA binding — see `packages/shared-editor-kit/README.md`.
+- **SDA (Avalonia / .NET 10):** integrated via a NativeWebView host bundle, same approach as
+  the Shared Editor Kit's SDA integration — see `packages/shared-editor-kit/README.md`.
+  `apps/student-desktop/StudentDesktop.csproj` copies this package's `dist/host/**` (built by
+  `npm run build:host`) into the app's output under `DmsHost/`, where SDA-24's
+  `MessageInbox`/`MessageThreadView` load through `Avalonia.Controls.WebView`.
 
 ## Design rules baked into the interface
 
