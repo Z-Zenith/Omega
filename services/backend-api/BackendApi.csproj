@@ -4,6 +4,19 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Repo-split precondition #4: commit an OpenAPI snapshot so downstream
+         consumers (campus-api-client, once split into its own repo) can pin
+         against a known contract version instead of a live running server. -->
+    <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)/Contracts</OpenApiDocumentsDirectory>
+    <!-- The generator's file-name option disallows ".", so generate as
+         "openapi-snapshot.json" and rename to "openapi.snapshot.json" below. -->
+    <OpenApiGenerateDocumentsOptions>--file-name openapi-snapshot</OpenApiGenerateDocumentsOptions>
+    <!-- Off by default: the generator builds the app's host to introspect
+         routes, which trips Program.cs's fail-fast guard (#137) unless
+         ASPNETCORE_ENVIRONMENT=Development is set. Regenerating the snapshot
+         is a deliberate step (see Contracts/README.md), not part of every
+         contributor's ordinary `dotnet build`. -->
+    <OpenApiGenerateDocumentsOnBuild>false</OpenApiGenerateDocumentsOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +30,10 @@
     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.10">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.9">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -26,5 +43,11 @@
     <PackageReference Include="Otp.NET" Version="1.4.1" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.19.1" />
   </ItemGroup>
+
+  <Target Name="RenameOpenApiSnapshot" AfterTargets="GenerateOpenApiDocuments">
+    <Move SourceFiles="$(MSBuildProjectDirectory)/Contracts/openapi-snapshot.json"
+          DestinationFiles="$(MSBuildProjectDirectory)/Contracts/openapi.snapshot.json"
+          Condition="Exists('$(MSBuildProjectDirectory)/Contracts/openapi-snapshot.json')" />
+  </Target>
 
 </Project>

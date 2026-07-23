@@ -1,0 +1,650 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Campus Platform \u2014 AI Services",
+    "description": "Microservice exposing copy-checking, plagiarism, and telemetry analysis APIs.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Read Root",
+        "description": "Health check endpoint.",
+        "operationId": "read_root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/similarity": {
+      "post": {
+        "summary": "Check Similarity",
+        "description": "Computes pairwise similarity scores between all submitted documents.\nReturns pairs of submissions that exceed the specified threshold (default 0.90 / 90%).",
+        "operationId": "check_similarity_api_v1_similarity_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimilarityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarityResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/suspicious-behaviour": {
+      "post": {
+        "summary": "Check Suspicious Behaviour",
+        "description": "Analyzes usage-pattern telemetry (SDA-25) recorded during an active class session\nor assignment window for signs of suspicious behaviour or automation. Callers are\nresponsible for only submitting telemetry gathered within an active window \u2014 this\nendpoint scores whatever it is given and does not itself track window state.",
+        "operationId": "check_suspicious_behaviour_api_v1_suspicious_behaviour_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuspiciousBehaviourRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuspiciousBehaviourResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/autograde": {
+      "post": {
+        "summary": "Suggest Autograde",
+        "description": "Suggests a grade for a submission against a weighted rubric (AIS-04). This is\nadvisory only \u2014 callers must surface it exclusively in the Teacher Web App for\nreview and must never auto-publish it or show it to the submitting student as-is.",
+        "operationId": "suggest_autograde_api_v1_autograde_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutogradeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutogradeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browsing-summary": {
+      "post": {
+        "summary": "Browsing Summary",
+        "description": "Generates a natural-language summary of a student's in-app browsing history\n(AIS-01). Visibility is enforced by the caller via the view_browsing_history\npermission \u2014 this endpoint has no notion of who's asking and summarizes\nwhatever visit history it's handed.",
+        "operationId": "browsing_summary_api_v1_browsing_summary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowsingSummaryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowsingSummaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AutogradeRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "The student's submission text or code"
+          },
+          "rubric": {
+            "items": {
+              "$ref": "#/components/schemas/RubricCriterionSchema"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rubric",
+            "description": "Criteria to check the submission against"
+          },
+          "max_score": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Score",
+            "description": "Maximum score for this assignment",
+            "default": 100.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "content",
+          "rubric"
+        ],
+        "title": "AutogradeRequest"
+      },
+      "AutogradeResponse": {
+        "properties": {
+          "suggested_grade": {
+            "type": "number",
+            "title": "Suggested Grade"
+          },
+          "max_score": {
+            "type": "number",
+            "title": "Max Score"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "matched_criteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Criteria"
+          },
+          "feedback": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Feedback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suggested_grade",
+          "max_score",
+          "confidence",
+          "matched_criteria",
+          "feedback"
+        ],
+        "title": "AutogradeResponse"
+      },
+      "BrowsingSummaryRequest": {
+        "properties": {
+          "visits": {
+            "items": {
+              "$ref": "#/components/schemas/BrowsingVisitSchema"
+            },
+            "type": "array",
+            "title": "Visits",
+            "description": "The student's recorded page visits to summarize (caller scopes the history window)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "visits"
+        ],
+        "title": "BrowsingSummaryRequest"
+      },
+      "BrowsingSummaryResponse": {
+        "properties": {
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary"
+        ],
+        "title": "BrowsingSummaryResponse"
+      },
+      "BrowsingVisitSchema": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Visited page URL"
+          },
+          "visited_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Visited At",
+            "description": "Client-reported visit timestamp"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds",
+            "description": "Time spent on the page, if tracked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "visited_at"
+        ],
+        "title": "BrowsingVisitSchema"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "RubricCriterionSchema": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Rubric criterion label shown to the teacher"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Keywords",
+            "description": "Any one of these (case-insensitive, whole-word) satisfies the criterion"
+          },
+          "weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Weight",
+            "description": "Fraction of max_score this criterion is worth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "keywords",
+          "weight"
+        ],
+        "title": "RubricCriterionSchema"
+      },
+      "SimilarityMatchSchema": {
+        "properties": {
+          "submission_a_id": {
+            "type": "string",
+            "title": "Submission A Id"
+          },
+          "submission_b_id": {
+            "type": "string",
+            "title": "Submission B Id"
+          },
+          "similarity_score": {
+            "type": "number",
+            "title": "Similarity Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "submission_a_id",
+          "submission_b_id",
+          "similarity_score"
+        ],
+        "title": "SimilarityMatchSchema"
+      },
+      "SimilarityRequest": {
+        "properties": {
+          "submissions": {
+            "items": {
+              "$ref": "#/components/schemas/SubmissionItemSchema"
+            },
+            "type": "array",
+            "title": "Submissions",
+            "description": "List of student submissions to check against each other"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold",
+            "description": "Cosine similarity threshold (default 0.90 / 90%)",
+            "default": 0.9
+          }
+        },
+        "type": "object",
+        "required": [
+          "submissions"
+        ],
+        "title": "SimilarityRequest"
+      },
+      "SimilarityResponse": {
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarityMatchSchema"
+            },
+            "type": "array",
+            "title": "Matches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "matches"
+        ],
+        "title": "SimilarityResponse"
+      },
+      "SubmissionItemSchema": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique submission identifier"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Source code or text content of the submission"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "content"
+        ],
+        "title": "SubmissionItemSchema"
+      },
+      "SuspiciousBehaviourRequest": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryEventSchema"
+            },
+            "type": "array",
+            "title": "Events",
+            "description": "Usage telemetry recorded during an active class session or assignment window (SDA-25)"
+          },
+          "min_confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Confidence",
+            "description": "Minimum combined confidence score required to surface a flag (default 0.70)",
+            "default": 0.7
+          }
+        },
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "title": "SuspiciousBehaviourRequest"
+      },
+      "SuspiciousBehaviourResponse": {
+        "properties": {
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/SuspiciousFlagSchema"
+            },
+            "type": "array",
+            "title": "Flags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "flags"
+        ],
+        "title": "SuspiciousBehaviourResponse"
+      },
+      "SuspiciousFlagSchema": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "title": "Student Id"
+          },
+          "class_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Session Id"
+          },
+          "assignment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment Id"
+          },
+          "confidence_score": {
+            "type": "number",
+            "title": "Confidence Score"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_id",
+          "confidence_score",
+          "reasons"
+        ],
+        "title": "SuspiciousFlagSchema"
+      },
+      "TelemetryEventSchema": {
+        "properties": {
+          "student_id": {
+            "type": "string",
+            "title": "Student Id",
+            "description": "Student the event belongs to"
+          },
+          "class_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Session Id",
+            "description": "Active class session the event occurred during, if any"
+          },
+          "assignment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment Id",
+            "description": "Active assignment window the event occurred during, if any"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "Telemetry event type, e.g. keystroke, paste, window_blur, window_focus, mouse_move"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata",
+            "description": "Event-specific detail, e.g. char_count for paste events"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At",
+            "description": "Client-reported event timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "student_id",
+          "event_type",
+          "recorded_at"
+        ],
+        "title": "TelemetryEventSchema"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

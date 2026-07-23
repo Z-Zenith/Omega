@@ -1,6 +1,6 @@
 # PostgreSQL setup
 
-Local Postgres container seeded from [`docs/Schema.md`](../docs/Schema.md).
+Local Postgres container seeded from [`docs/campus-platform-db-api-schema.md`](../docs/campus-platform-db-api-schema.md).
 
 ## Start the container
 
@@ -16,8 +16,11 @@ docker compose up -d postgres
 The first run executes everything in `db/init/` alphabetically on a fresh
 data volume. The schema lives in `01_schema.sql`; default roles/permissions
 in `02_seed_roles_and_permissions.sql`; `03_create_app_role.sh` provisions a
-least-privilege `campus_app` role (see that script's header comment — it's
-additive-only today, backend-api still connects as `campus`).
+least-privilege `campus_app` role (#137) that the containerized backend-api
+service now connects as via `docker-compose.yml`'s `ConnectionStrings__Campus`
+override — see that script's header comment. Local `dotnet run` outside
+Docker Compose still uses `campus` (this file's connection string above and
+`appsettings.json`'s dev placeholder are unaffected).
 
 Connection (matches the credentials in `docker-compose.yml`, assuming the
 documented `.env.example` dev value):
