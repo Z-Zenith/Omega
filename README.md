@@ -17,7 +17,7 @@ Public TypeScript interface for the **Shared Editor Kit (SEK)** — the cross-co
 ## Consumers
 
 - **TWA (React + TypeScript):** imports types directly from this package.
-- **SDA (Avalonia / .NET 10):** a C# binding is **deferred to a later PR** because the SDA project is not yet scaffolded in this repo. Tracked as a follow-up to this PR — see `apps/student-desktop/` (currently empty).
+- **SDA (Avalonia / .NET 10):** integrated via a NativeWebView host bundle, not a C# binding. `apps/student-desktop/StudentDesktop.csproj` copies `dist/host/**` (built by `npm run build:host`) into the app's output under `SekHost/`, and SDA-19's `NotesEditor` loads there through `Avalonia.Controls.WebView`. Building `dist/host/**` before `dotnet build` is a manual dev prerequisite for now — not yet wired into a cross-toolchain CI step (tracked as a follow-up).
 
 ## Usage
 
